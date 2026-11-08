@@ -32,7 +32,7 @@ export interface SyncRun {
 }
 export interface SyncRunDetail extends SyncRun { log: string[] }
 export interface ScheduleSlot { id: string; label: string; league?: "nfl" | "nba"; when: string; odds_mode: string; full: boolean; why: string; next_at: string; last_run: SyncRun | null }
-export interface AdminState { auto_sync: AutoSync; timezone: string; credits: CreditStatus; credits_nba?: CreditStatus | null; slots: ScheduleSlot[]; runs: SyncRun[]; job: JobStatus; can_run_projections: boolean;
+export interface AdminState { auto_sync: AutoSync; timezone: string; credits: CreditStatus; credits_nba?: CreditStatus | null; slots: ScheduleSlot[]; runs: SyncRun[]; job: JobStatus; job_nba?: JobStatus | null; can_run_projections: boolean;
   /** Offshore books (licensed in no US state) are kept off every list and price. */
   hide_offshore: boolean }
 

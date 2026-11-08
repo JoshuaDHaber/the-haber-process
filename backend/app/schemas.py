@@ -519,7 +519,8 @@ class AdminState(BaseModel):
     credits_nba: Optional[CreditStatus] = None   # the NBA's own key (ODDS_API_KEY_NBA)
     slots: list[SlotOut]
     runs: list[SyncRunOut]
-    job: JobStatus
+    job: JobStatus                       # the NFL sync
+    job_nba: Optional[JobStatus] = None  # the NBA sync, which can run at the same time
     can_run_projections: bool
     hide_offshore: bool = False
 

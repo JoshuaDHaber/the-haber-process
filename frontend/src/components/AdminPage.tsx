@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { Fragment, useEffect, useState } from "react";
-import { api, type CreditStatus, type ScheduleSlot, type SyncRun } from "../api";
+import { api, type CreditStatus, type JobStatus, type ScheduleSlot, type SyncRun } from "../api";
 import { useAuth } from "../auth";
 import { BASE } from "../env";
 import { timeAgo } from "../format";
@@ -51,7 +51,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   const [now, setNow] = useState(() => Date.now());
   const state = useQuery({
     queryKey: ["admin", who], queryFn: api.admin, retry: false,
-    refetchInterval: (q) => (q.state.data?.job.state === "running" ? 2000 : 30_000),
+    refetchInterval: (q) => (q.state.data?.job.state === "running" || q.state.data?.job_nba?.state === "running" ? 2000 : 30_000),
   });
   const runNow = useMutation({ mutationFn: api.runSlotNow, onSuccess: () => qc.invalidateQueries({ queryKey: ["admin"] }) });
   // every list of books and every price changes with it: refetch the whole site's data, not just this page
@@ -76,8 +76,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
   if (state.error || !state.data) return page(<p className="err">{(state.error as Error)?.message}</p>);
 
   const d = state.data;
-  const job = d.job;
-  const running = job.state === "running";
+  // each league has its own sync, so an NFL recalibration and an NBA sync can run side by side
+  const busy = (league: "nfl" | "nba") => (league === "nba" ? d.job_nba : d.job)?.state === "running";
   const c = d.credits;
   const confirmRun = (s: ScheduleSlot) => {
     const cost = s.odds_mode === "none" ? "It spends no Odds API credits." : "It fetches odds, which spends credits (never below the floor).";
@@ -101,6 +101,8 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
               <span className="mut">{d.auto_sync.next_label} · {localWhen(d.auto_sync.next_at)}</span></>
           ) : <div className="big">Off</div>}
         </div>
+        <JobCard label={d.job_nba ? "Now (NFL)" : "Now"} job={d.job} now={now} />
+        {d.job_nba && <JobCard label="Now (NBA)" job={d.job_nba} now={now} />}
         <CreditCard label="Odds API credits (NFL)" k={c} now={now} />
         {d.credits_nba && <CreditCard label="Odds API credits (NBA)" k={d.credits_nba} now={now} />}
         <div className="card admin-card">
@@ -111,16 +113,6 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
           </label>
           <span className="mut">Bovada, BetOnline.ag, BetUS, MyBookie.ag, LowVig.ag. Hidden, they still count toward the market consensus.</span>
           {hideOffshore.error && <span className="err">{(hideOffshore.error as Error).message}</span>}
-        </div>
-        <div className="card admin-card">
-          <span className="mut">Now</span>
-          {running ? (
-            <>
-              <div className="big"><small>{progressLine(job, elapsedSeconds(job.started_at, now))}</small></div>
-              {job.progress != null && <div className="job"><div className="bar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div></div>}
-              {job.detail && <span className="mut">{job.detail}</span>}
-            </>
-          ) : <><div className="big">Idle</div><span className="mut">{job.finished_at ? `Last sync finished ${timeAgo(job.finished_at, now)}` : "No sync since the server started"}</span></>}
         </div>
       </div>
       {runNow.error && <p className="err">{(runNow.error as Error).message}</p>}
@@ -137,7 +129,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
                 <td className="wrap-cell">{s.why}</td>
                 <td title={localWhen(s.next_at)}>{untilText(s.next_at, now)}</td>
                 <td>{s.last_run ? <><Status s={s.last_run.status} /> <span className="mut">{timeAgo(s.last_run.started_at, now)}</span></> : <span className="mut">never</span>}</td>
-                <td><button className="link" disabled={running || runNow.isPending} onClick={() => confirmRun(s)}>Run now</button></td>
+                <td><button className="link" disabled={busy(s.league ?? "nfl") || runNow.isPending} title={busy(s.league ?? "nfl") ? `An ${(s.league ?? "nfl").toUpperCase()} sync is running` : undefined} onClick={() => confirmRun(s)}>Run now</button></td>
               </tr>
             ))}
           </tbody>
@@ -170,6 +162,25 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }) 
         </table>
       </div>
     </>)
+  );
+}
+
+function JobCard({ label, job, now }: { label: string; job: JobStatus; now: number }) {
+  return (
+    <div className="card admin-card">
+      <span className="mut">{label}</span>
+      {/* announces a start or finish only: the visible line below ticks every second */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {`${label.replace(/^Now ?/, "").replace(/[()]/g, "")} sync ${job.state === "running" ? "running" : job.state === "error" ? "failed" : "idle"}`.trim()}
+      </span>
+      {job.state === "running" ? (
+        <>
+          <div className="big"><small>{progressLine(job, elapsedSeconds(job.started_at, now))}</small></div>
+          {job.progress != null && <div className="job"><div className="bar"><i style={{ width: `${Math.round(job.progress * 100)}%` }} /></div></div>}
+          {job.detail && <span className="mut">{job.detail}</span>}
+        </>
+      ) : <><div className="big">Idle</div><span className="mut">{job.finished_at ? `Last sync finished ${timeAgo(job.finished_at, now)}` : "No sync since the server started"}</span></>}
+    </div>
   );
 }
 

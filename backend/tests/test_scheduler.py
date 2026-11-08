@@ -14,10 +14,13 @@ from app.db import SessionLocal, SyncRun
 def clean(monkeypatch):
     with SessionLocal() as s:
         s.query(SyncRun).delete(); s.commit()
-    scheduler._job.update(state="idle")
+    for job in scheduler._jobs.values():
+        job.update(state="idle")
     monkeypatch.setattr(scheduler.pipeline, "run_projections", lambda log=print, **kw: log("fake run"))
+    monkeypatch.setattr(scheduler.nba_pipeline, "run_projections", lambda log=print, **kw: log("fake NBA run") or True)
     yield
-    scheduler._job.update(state="idle")
+    for job in scheduler._jobs.values():
+        job.update(state="idle")
 
 
 def test_slot_times_follow_eastern_time_across_daylight_saving():
@@ -91,14 +94,14 @@ def test_a_child_process_relays_its_log_progress_and_result():
 def test_a_child_killed_for_memory_is_logged_as_an_error_and_the_server_lives_on(monkeypatch):
     real = scheduler._in_child
     monkeypatch.setattr(scheduler.config, "SYNC_SUBPROCESS", lambda: True)
-    monkeypatch.setattr(scheduler, "_in_child", lambda args, log: real(args, log, target=_child_killed_for_memory))
-    assert scheduler.claim()
+    monkeypatch.setattr(scheduler, "_in_child", lambda args, log, job=None: real(args, log, target=_child_killed_for_memory, job=job))
+    assert scheduler.claim("nba")
     scheduler.run("all", slot="nba-pregame", trigger="schedule", league="nba")
     with SessionLocal() as s:
         r = s.query(SyncRun).one()
     assert r.status == "error" and "out of memory" in r.error
     assert r.log[0] == "about to run out of memory"
-    assert scheduler._job["state"] == "error"
+    assert scheduler._jobs["nba"]["state"] == "error" and scheduler._job["state"] == "idle"
 
 
 def test_a_slot_never_runs_twice_for_the_same_time(monkeypatch):
@@ -169,3 +172,53 @@ def test_admin_credits_show_the_spare_key_too(monkeypatch):
         c = local.get("/api/admin").json()["credits"]
     assert c["key_name"] == "ODDS_API_KEY" and c["remaining"] == 300 and c["rotate"] == []
     assert c["others"] == [dict(key_name="ODDS_API_KEY_NFL_SECONDARY", key_hint="bbbb", remaining=480, error=None)]
+
+
+def test_each_league_has_its_own_job_so_nfl_and_nba_syncs_can_overlap():
+    assert scheduler.claim("nfl")
+    assert not scheduler.claim("nfl")        # never two syncs of one league
+    assert scheduler.claim("nba")            # but the NBA one starts while the NFL one runs
+    scheduler.run("none", slot="nba-morning", trigger="schedule", league="nba")
+    assert scheduler._jobs["nba"]["state"] == "done" and scheduler._jobs["nfl"]["state"] == "running"
+    assert scheduler._job is scheduler._jobs["nfl"]
+
+
+def test_a_long_nfl_sync_does_not_hold_up_a_due_nba_slot(monkeypatch):
+    """The schedule's clock keeps ticking during a run: each league's slots go to their own worker.
+    (run itself is faked: the tests' in-memory SQLite shares one connection, which two writing threads would trip over.)"""
+    import threading
+    release, nfl_started, nba_done = threading.Event(), threading.Event(), threading.Event()
+    ran = []
+
+    def fake_run(odds, full, slot, trigger, at, league):
+        ran.append((slot, trigger))
+        if league == "nfl":
+            nfl_started.set(); release.wait(10)
+        else:
+            nba_done.set()
+        scheduler._jobs[league].update(state="done")
+    monkeypatch.setattr(scheduler, "run", fake_run)
+    monkeypatch.setattr(scheduler, "_already_ran", lambda slot, at: False)
+    monkeypatch.setattr(scheduler, "SLOTS", [scheduler.BY_ID["new-week"], scheduler.BY_ID["nba-morning"]])
+    at = datetime(2026, 11, 10, 15)          # Tue 10:00 AM ET: both slots due at once
+    monkeypatch.setattr(scheduler, "last_fire", lambda slot, now: at)
+    monkeypatch.setattr(scheduler, "datetime", type("D", (datetime,), {"utcnow": staticmethod(lambda: datetime(2026, 11, 10, 15, 5))}))
+    stop = threading.Event()
+    t = threading.Thread(target=scheduler._loop, args=(stop,), daemon=True)
+    t.start()
+    try:
+        assert nfl_started.wait(10) and nba_done.wait(10), "the NBA slot waited on the NFL recalibration"
+        assert scheduler._jobs["nfl"]["state"] == "running"
+    finally:
+        release.set(); stop.set(); t.join(5)
+    assert sorted(ran) == [("nba-morning", "catch-up"), ("new-week", "catch-up")]
+
+
+def test_admin_shows_both_leagues_jobs_and_runs_one_league_while_the_other_is_busy(monkeypatch):
+    monkeypatch.setattr(scheduler.nba_pipeline, "refresh_odds", lambda mode, log=print, **kw: {})
+    with TestClient(main.app) as local:
+        assert scheduler.claim("nfl")
+        assert local.post("/api/admin/run/wed-odds").status_code == 409
+        assert local.post("/api/admin/run/nba-morning").status_code == 202
+        body = local.get("/api/admin").json()
+    assert body["job"]["state"] == "running" and body["job_nba"]["state"] == "done"
