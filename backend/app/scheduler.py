@@ -1,7 +1,7 @@
 """Sync jobs and the weekly schedule that runs them, so nobody has to press a button.
 
-One job runs at a time (model run and/or odds fetch), whether the schedule or the admin page started it. Every job
-is logged as a SyncRun. Odds fetches stop before a key drops under config.ODDS_CREDIT_FLOOR credits, switching to the spare key first.
+One job per league runs at a time (model run and/or odds fetch), whether the schedule or the admin page started it,
+so an NFL recalibration and the NBA morning sync can run side by side. Every job is logged as a SyncRun. Odds fetches stop before a key drops under config.ODDS_CREDIT_FLOOR credits, switching to the spare key first.
 The schedule runs in a background thread of the web process: fine on a single always-on instance (Railway Hobby). The
 job's work runs in a child process (config.SYNC_SUBPROCESS), so its memory goes back to the OS when it finishes.
 """
@@ -99,30 +99,41 @@ def describe(slot: Slot) -> str:
     return f"{days} {t} ET"
 
 
-# ---------- the job ----------
-_job = {"state": "idle", "started_at": None, "finished_at": None, "log": [], "error": None,
-        "stage": None, "step": 0, "steps": 0, "detail": None, "progress": None}
+# ---------- the jobs: one per league ----------
+# Each league's job runs in its own child process, so they don't share memory, and each spends its own Odds API key.
+# Two jobs of one league never overlap: both would write that league's runs and odds.
+LEAGUES = ("nfl", "nba")
+
+
+def _idle() -> dict:
+    return {"state": "idle", "started_at": None, "finished_at": None, "log": [], "error": None,
+            "stage": None, "step": 0, "steps": 0, "detail": None, "progress": None}
+
+
+_jobs = {lg: _idle() for lg in LEAGUES}
+_job = _jobs["nfl"]   # the NFL job: what /api/meta and the NFL refresh endpoints report
 _lock = threading.Lock()
 after_job: Callable[[], None] = lambda: None   # main.py hooks in cache clearing and memory release
 
 
-def claim() -> bool:
-    """Mark a job as running; False if one already is."""
+def claim(league: str = "nfl") -> bool:
+    """Mark the league's job as running; False if one already is."""
+    job = _jobs[league]
     with _lock:
-        if _job["state"] == "running":
+        if job["state"] == "running":
             return False
-        _job.update(state="running", started_at=datetime.utcnow().isoformat(), finished_at=None, log=[], error=None,
-                    stage="Starting", step=0, steps=0, detail=None, progress=None)
+        job.update(state="running", started_at=datetime.utcnow().isoformat(), finished_at=None, log=[], error=None,
+                   stage="Starting", step=0, steps=0, detail=None, progress=None)
         return True
 
 
 def run(odds_mode: str, full: bool = False, slot: str = "manual", trigger: str = "manual",
         scheduled_for: Optional[datetime] = None, league: str = "nfl") -> None:
-    """Run a claimed job: the model (unless this host only fetches odds), then odds. Logs it as a SyncRun."""
-    nba = league == "nba"
+    """Run a job claimed for its league: the model (unless this host only fetches odds), then odds. Logs it as a SyncRun."""
+    nba, job = league == "nba", _jobs[league]
     run_model = nba or config.PROJECTIONS_ON_SERVER()   # the NBA model is small enough for any host
     steps = int(run_model) + int(odds_mode != "none")
-    _job.update(steps=steps, step=0, stage=None, detail=None, progress=None)
+    job.update(steps=steps, step=0, stage=None, detail=None, progress=None)
     with SessionLocal() as s:
         rec = SyncRun(slot=slot, trigger=trigger, scheduled_for=scheduled_for, odds_mode=odds_mode, full=full,
                       started_at=datetime.utcnow(), log=[])
@@ -132,13 +143,13 @@ def run(odds_mode: str, full: bool = False, slot: str = "manual", trigger: str =
 
     def log(msg):
         msg = odds_api.redact(msg)   # tracebacks and request errors can carry the API key in a URL
-        _job["log"].append(msg)
-        _job["detail"] = msg.strip()
+        job["log"].append(msg)
+        job["detail"] = msg.strip()
 
     res, status, parts, error = {}, "error", [], None
     try:
         args = (odds_mode, full, nba, run_model, steps)
-        res, parts, status, error = _in_child(args, log) if config.SYNC_SUBPROCESS() else _work(*args, _job.update, log)
+        res, parts, status, error = _in_child(args, log, job=job) if config.SYNC_SUBPROCESS() else _work(*args, job.update, log)
     except Exception as e:  # the child couldn't even start
         error = odds_api.redact(f"{type(e).__name__}: {e}")
         log(traceback.format_exc(limit=3))
@@ -153,15 +164,15 @@ def run(odds_mode: str, full: bool = False, slot: str = "manual", trigger: str =
                 rec.games_fetched = int(res.get("fetched", 0))
                 rec.credits_before, rec.credits_after = res.get("credits_before"), res.get("credits_after")
                 rec.summary = (" · ".join(p for p in parts if p) or (error or ""))[:500]
-                rec.log = _job["log"][-LOG_LINES:]
+                rec.log = job["log"][-LOG_LINES:]
                 s.commit()
         except Exception:  # a failed log write must never leave the job looking stuck
             traceback.print_exc()
         if error:
-            _job.update(state="error", error=error)
+            job.update(state="error", error=error)
         else:
-            _job.update(state="done", stage="Done", detail=None, progress=1.0)
-        _job["finished_at"] = datetime.utcnow().isoformat()
+            job.update(state="done", stage="Done", detail=None, progress=1.0)
+        job["finished_at"] = datetime.utcnow().isoformat()
         after_job()
 
 
@@ -204,8 +215,9 @@ def _child(q, args: tuple) -> None:
     q.put(("done", _work(*args, lambda **kw: q.put(("update", kw)), lambda msg: q.put(("log", msg)))))
 
 
-def _in_child(args: tuple, log: Callable, target: Callable = _child):
-    """Run _work in a fresh process, relaying what it reports to _job; the same result tuple as _work."""
+def _in_child(args: tuple, log: Callable, target: Callable = _child, job: Optional[dict] = None):
+    """Run _work in a fresh process, relaying what it reports to the job (the NFL one by default); the same result tuple as _work."""
+    job = _job if job is None else job
     ctx = multiprocessing.get_context("spawn")   # not fork: this process has threads and open database connections
     q = ctx.Queue()
     p = ctx.Process(target=target, args=(q, args), name="sync-job", daemon=True)
@@ -226,7 +238,7 @@ def _in_child(args: tuple, log: Callable, target: Callable = _child):
         if kind == "log":
             log(payload)
         else:
-            _job.update(**payload)
+            job.update(**payload)
     p.join()
     error = f"The sync process died (exit code {p.exitcode}" + (", most likely out of memory)" if p.exitcode == -9 else ")")
     log(error)
@@ -284,7 +296,7 @@ def _fire(slot: Slot, at: datetime, trigger: str, stop: threading.Event) -> None
     if _already_ran(slot, at):
         return
     deadline = datetime.utcnow() + timedelta(minutes=30)
-    while not claim():
+    while not claim(slot.league):
         if datetime.utcnow() > deadline or stop.wait(20):
             with SessionLocal() as s:
                 s.add(SyncRun(slot=slot.id, trigger=trigger, scheduled_for=at, odds_mode=slot.odds, full=slot.full,
@@ -294,24 +306,40 @@ def _fire(slot: Slot, at: datetime, trigger: str, stop: threading.Event) -> None
     run(slot.odds, slot.full, slot.id, trigger, at, slot.league)
 
 
+def _worker(league: str, q: "queue.Queue", stop: threading.Event) -> None:
+    """Run one league's due slots in the order they came due, one at a time."""
+    while not stop.is_set():
+        try:
+            s, at, trigger = q.get(timeout=1)
+        except queue.Empty:
+            continue
+        try:
+            _fire(s, at, trigger, stop)
+        except Exception:  # never let one bad run stop the schedule
+            traceback.print_exc()
+
+
 def _loop(stop: threading.Event) -> None:
+    # each league's slots go to its own worker thread, so a long NFL run never holds up an NBA slot (or the clock below)
+    queues = {lg: queue.Queue() for lg in LEAGUES}
+    for lg, q in queues.items():
+        threading.Thread(target=_worker, args=(lg, q, stop), name=f"sync-{lg}", daemon=True).start()
     now = datetime.utcnow()
-    # a deploy or restart that straddled a slot: run the most recent one missed within the catch-up window
+    # a deploy or restart that straddled a slot: run each league's most recent one missed within the catch-up window
     missed = [(last_fire(s, now), s) for s in SLOTS]
     missed = [(t, s) for t, s in missed if now - t < CATCH_UP and not _already_ran(s, t)]
-    if missed:
-        t, s = max(missed, key=lambda m: m[0])
-        _fire(s, t, "catch-up", stop)
-    due = {s.id: next_fire(s, datetime.utcnow()) for s in SLOTS}
+    for lg in LEAGUES:
+        theirs = [m for m in missed if m[1].league == lg]
+        if theirs:
+            t, s = max(theirs, key=lambda m: m[0])
+            queues[lg].put((s, t, "catch-up"))
+    due = {s.id: next_fire(s, now) for s in SLOTS}
     while not stop.wait(30):
         now = datetime.utcnow()
         for s in sorted(SLOTS, key=lambda s: due[s.id]):
             if due[s.id] <= now:
-                try:
-                    _fire(s, due[s.id], "schedule", stop)
-                except Exception:  # never let one bad run stop the schedule
-                    traceback.print_exc()
-                due[s.id] = next_fire(s, datetime.utcnow())
+                queues[s.league].put((s, due[s.id], "schedule"))
+                due[s.id] = next_fire(s, now)
 
 
 _thread: Optional[threading.Thread] = None

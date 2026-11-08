@@ -154,6 +154,22 @@ def test_an_old_calibration_is_refit_whatever_was_asked(synthetic):
     assert any("Walk-forward backtest" in l for l in log)
 
 
+def test_a_calibration_fitted_for_an_earlier_week_is_refit(synthetic):
+    """A missed Tuesday refit: the first run of the new week refits rather than reusing last week's tables."""
+    first = pipeline.run_projections(log=lambda m: None)
+    assert pipeline.reusable_calibration(2026, week=5) is not None
+    assert pipeline.reusable_calibration(2026, week=6) is None
+    with SessionLocal() as s:
+        run = s.get(Run, first)
+        v = dict(run.variance)
+        v["_calibration"] = dict(v["_calibration"], week=4)   # fitted the week before this target week
+        run.variance = v
+        s.commit()
+    log = []
+    again = pipeline.run_projections(log=log.append)
+    assert any("Walk-forward backtest" in l for l in log) and calibration(again)["week"] == 5
+
+
 def test_a_run_from_another_season_or_without_a_calibration_is_not_reused(synthetic):
     pipeline.run_projections(log=lambda m: None)
     assert pipeline.reusable_calibration(2026) is not None

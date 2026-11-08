@@ -190,12 +190,13 @@ def records(df: pd.DataFrame) -> list[dict]:
     return df.replace({np.nan: None}).to_dict("records")
 
 
-# ---------- job runner (app/scheduler.py runs jobs; the same state object is shared here) ----------
-_job = scheduler._job
+# ---------- job runner (app/scheduler.py runs jobs, one per league; the same state objects are shared here) ----------
+_job = scheduler._job     # the NFL job
+_jobs = scheduler._jobs
 
 
 def _release_memory():
-    """Hand a finished job's memory back to the OS (matters on a 1 GB host) and drop caches the new data outdates."""
+    """Hand a finished job's memory back to the OS and drop caches the new data outdates."""
     import gc
     _injury_report.cache_clear()
     _next_week_schedule.cache_clear()
@@ -659,7 +660,7 @@ def refresh_plan(request: Request, odds: Literal["none", "missing", "thin", "tod
         run = latest_run(s)
         cal = (run.variance or {}).get("_calibration") if run else None
     season = plan.get("season")
-    will_recalibrate = bool(full) or season is None or pipeline.reusable_calibration(season) is None
+    will_recalibrate = bool(full) or season is None or pipeline.reusable_calibration(season, week=plan.get("week")) is None
     return SyncPlan(**plan, will_run_projections=config.PROJECTIONS_ON_SERVER(), has_odds_key=bool(config.ODDS_API_KEY()),
                     will_recalibrate=will_recalibrate, calibration=cal)
 
@@ -698,7 +699,7 @@ def _credit_status(league: str = "nfl") -> CreditStatus:
         return CreditStatus(floor=floor, error=f"No {'ODDS_API_KEY_NBA' if league == 'nba' else 'ODDS_API_KEY'} set")
     now = time.time()
     for _, key in keys:
-        if key not in _credits or now - _credits[key][0] > 60 or _job["state"] == "running":
+        if key not in _credits or now - _credits[key][0] > 60 or _jobs[league]["state"] == "running":
             try:
                 _credits[key] = (now, odds.credits_remaining(key), None)
             except Exception as e:
@@ -731,7 +732,7 @@ def admin_state(limit: int = Query(60, ge=1, le=500), db: Session = Depends(get_
              for at, s in scheduler.upcoming()]
     return AdminState(auto_sync=_auto_sync(None), timezone="America/New_York", credits=_credit_status(),
                       credits_nba=_credit_status("nba"), slots=slots,
-                      runs=[SyncRunOut(**_run_out(r)) for r in runs], job=JobStatus(**_job),
+                      runs=[SyncRunOut(**_run_out(r)) for r in runs], job=JobStatus(**_job), job_nba=JobStatus(**_jobs["nba"]),
                       can_run_projections=config.PROJECTIONS_ON_SERVER(), hide_offshore=books.hide_offshore(db))
 
 
@@ -756,10 +757,10 @@ def admin_run_now(slot_id: str, bg: BackgroundTasks):
     slot = scheduler.BY_ID.get(slot_id)
     if not slot:
         raise HTTPException(404, "No such schedule slot")
-    if not scheduler.claim():
-        raise HTTPException(409, "A sync is already running")
+    if not scheduler.claim(slot.league):
+        raise HTTPException(409, f"An {slot.league.upper()} sync is already running")
     bg.add_task(scheduler.run, slot.odds, slot.full, slot.id, "manual", None, slot.league)
-    return JobStatus(**_job)
+    return JobStatus(**_jobs[slot.league])
 
 
 @app.get("/healthz", include_in_schema=False)

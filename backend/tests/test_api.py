@@ -340,10 +340,10 @@ def test_a_model_only_sync_has_one_step(client, monkeypatch):
 
 def test_the_plan_says_whether_the_model_will_refit_and_what_calibration_it_has(client, monkeypatch):
     monkeypatch.setattr(main.pipeline, "upcoming_games", _two_games)
-    monkeypatch.setattr(main.pipeline, "reusable_calibration", lambda season: dict(variance={}, backtest={}, run_id=3))
+    monkeypatch.setattr(main.pipeline, "reusable_calibration", lambda season, week=None: dict(variance={}, backtest={}, run_id=3))
     assert client.get("/api/refresh/plan").json()["will_recalibrate"] is False           # a fresh calibration exists: fast
     assert client.get("/api/refresh/plan", params={"full": True}).json()["will_recalibrate"] is True
-    monkeypatch.setattr(main.pipeline, "reusable_calibration", lambda season: None)
+    monkeypatch.setattr(main.pipeline, "reusable_calibration", lambda season, week=None: None)
     assert client.get("/api/refresh/plan").json()["will_recalibrate"] is True            # nothing to reuse: it must refit
     thin = client.get("/api/refresh/plan", params={"odds": "thin"}).json()
     assert thin["games"] and all(g["reason"] in ("missing", "thin") for g in thin["games"])

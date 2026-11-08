@@ -29,9 +29,15 @@ ALT_KINDS = set(odds.ALT_MARKETS.values())  # anytime TD has no alternate market
 CALIBRATION_MAX_AGE_DAYS = 21   # a saved calibration older than this is refit, whatever the caller asked
 
 
-def reusable_calibration(season: int, now: datetime = None):
+def reusable_calibration(season: int, now: datetime = None, week: Optional[int] = None):
     """The latest run, if it carries a calibration (error tables, TD scale, redistribution shares) that is still
-    fresh enough to reuse for this season. Reusing it skips the backtest, which is almost all of a run's time."""
+    fresh enough to reuse for this season (and, given a week, was fitted for that week). Reusing it skips the backtest,
+    which is almost all of a run's time.
+
+    The backtest only scores weeks before the target week, so a refit within one week sees the same games and gives
+    the same calibration. It changes once a week, when the target week moves on (Tuesday's new-week slot refits then).
+    If that refit was missed (cut off, a failed sync), the first run of the new week refits instead of carrying last
+    week's calibration for up to CALIBRATION_MAX_AGE_DAYS."""
     now = now or datetime.utcnow()
     with SessionLocal() as s:
         run = s.query(Run).order_by(Run.id.desc()).first()
@@ -52,6 +58,8 @@ def reusable_calibration(season: int, now: datetime = None):
             return None  # error tables fitted with another receiver adjustment for a downgrade at quarterback
         if (now - datetime.fromisoformat(cal["at"])).days > CALIBRATION_MAX_AGE_DAYS:
             return None
+        if week is not None and cal.get("week") != week:
+            return None  # fitted for an earlier week: this week's backtest has a week more of games
         return dict(variance=copy.deepcopy(v), backtest=copy.deepcopy(run.backtest), run_id=run.id)
 
 
@@ -178,7 +186,7 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
     manual_ids = set(stats[stats.player_display_name.map(odds.norm).isin(names)].player_id) if names else set()
     absent_ids = {pid for pid, s_ in status.items() if s_ in drop} | manual_ids
 
-    saved = None if full else reusable_calibration(season)
+    saved = None if full else reusable_calibration(season, week=week)
     if saved:
         var_params, bt_sum = saved["variance"], saved["backtest"]
         cal = dict(var_params.get("_calibration"), reused_from_run=saved["run_id"])
