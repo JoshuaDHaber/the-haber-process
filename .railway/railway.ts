@@ -8,6 +8,15 @@ export default defineRailway(() => {
   // The app's database. Its DATABASE_URL reaches the web service as a variable (unmanaged, set on Railway).
   const db = postgres("Postgres");
 
+  // Postgres's data volume. Railway mounts it on the database itself (/var/lib/postgresql/data), so it has no
+  // volumeMounts entry. Grown from 500 MB to 2 GB on 2026-11-07 after the Hobby upgrade, at 96% full.
+  const dbData = volume("postgres-volume", {
+    alerts: { usage: { "100": {}, "80": {}, "95": {} } },
+    allowOnlineResize: true,
+    region: "iad",
+    sizeMB: 2048,
+  });
+
   // The ESPN cache lives here (backend/data), and the SQLite database the app used before Postgres.
   const data = volume("nfl-prop-predictor-volume", {
     alerts: { usage: { "100": {}, "80": {}, "95": {} } },
@@ -31,6 +40,6 @@ export default defineRailway(() => {
   return project("Haber-Process-Railway", {
     // Unmanaged: the CLI reads this, though the SDK 3.16 types do not list it yet.
     variables: { managed: false },
-    resources: [web, data, db],
+    resources: [web, data, db, dbData],
   });
 });
