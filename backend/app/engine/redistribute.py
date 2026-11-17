@@ -203,3 +203,18 @@ def pick_starter(starts: pd.DataFrame, team_games, cands, ruled_out=frozenset(),
             continue
         best[pid] = max(best.get(pid, 0), t)
     return max(best, key=best.get) if best else None
+
+
+def arriving_starter(incumbent, season_starts: dict, arrivals) -> object:
+    """pick_starter only sees starts made for the team, so a quarterback who joined mid-season after starting for his
+    old team looks like he has none (Jacoby Brissett: ARI's starter weeks 1-8 of 2026, on BAL's week-10 roster, where
+    Joe Fagnano's two fill-in starts were the latest). The arrival with the most starts this season takes over when he
+    has more than the incumbent, or there is no incumbent. A starter who's held the job keeps it against a veteran
+    signed as his backup.
+
+    season_starts: pid -> starts this season, for any team. arrivals: the candidates with no game for this team yet."""
+    arrivals = [a for a in arrivals if season_starts.get(a, 0) > 0]
+    if not arrivals:
+        return incumbent
+    best = max(sorted(arrivals), key=lambda a: season_starts[a])
+    return best if incumbent is None or season_starts[best] > season_starts.get(incumbent, 0) else incumbent

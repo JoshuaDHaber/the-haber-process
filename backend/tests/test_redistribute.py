@@ -291,6 +291,40 @@ def test_a_starter_who_sat_out_a_questionable_week_gets_his_job_back_once_off_th
     assert rd.pick_starter(log, games, {"caleb", "bagent"}, ruled, sat_out=sat) == "caleb"
 
 
+def test_a_mid_season_arrival_who_was_starting_takes_over_from_a_fill_in():
+    """Brissett: 8 starts for ARI in 2026, then on BAL's roster, where Fagnano had made BAL's latest 2 starts."""
+    assert rd.arriving_starter("fagnano", {"fagnano": 2, "brissett": 8}, ["brissett"]) == "brissett"
+    assert rd.arriving_starter(None, {"brissett": 8}, ["brissett"]) == "brissett"                 # nobody started here yet
+    assert rd.arriving_starter("starter", {"starter": 8, "vet": 8}, ["vet"]) == "starter"         # signed as a backup
+    assert rd.arriving_starter("fagnano", {"fagnano": 2, "vet": 0}, ["vet"]) == "fagnano"         # no starts to go on
+    assert rd.arriving_starter("fagnano", {"fagnano": 2}, []) == "fagnano"
+
+
+def test_live_a_traded_starter_is_projected_instead_of_the_fill_in():
+    df = qb_league(qb1_weeks=range(1, 7), weeks=range(1, 9))
+    df.loc[(df.player_id == "qb2") & df.week.isin([7, 8]), "attempts"] = 25   # qb2 filled in for weeks 7-8
+    df = model.prep(df.drop(columns="qb_start"))
+    s, pri = sched(), model.league_priors(df)
+    dist = {k: dict(mu=[1.0, 400.0], sd=[40.0, 40.0], z=[float(z) for z in np.linspace(-2, 2, 41)]) for k in ("rush", "rec", "pass", "rr", "recs")}
+
+    def qbs(roster):
+        p = model.upcoming_projections(df, s, pri, dist, 202609, roster, rho={"rush": 0.5, "rec": 0.0, "pass": 0.0})
+        return set(p[p.pos == "QB"].player_id)
+
+    team = {pid: "AAA" for pid in ("qb2", "qb3", "rb", "wr")}
+    assert qbs(team) == {"qb2"}
+    assert qbs({**team, "zz": "AAA"}) == {"zz"}            # CCC's 8-game starter, traded to AAA
+
+
+def test_live_a_starter_who_held_the_job_keeps_it_against_an_arriving_veteran():
+    df = qb_league(qb1_weeks=range(1, 9), weeks=range(1, 9))
+    s, pri = sched(), model.league_priors(df)
+    dist = {k: dict(mu=[1.0, 400.0], sd=[40.0, 40.0], z=[float(z) for z in np.linspace(-2, 2, 41)]) for k in ("rush", "rec", "pass", "rr", "recs")}
+    roster = {pid: "AAA" for pid in ("qb1", "qb2", "qb3", "rb", "wr", "zz")}
+    p = model.upcoming_projections(df, s, pri, dist, 202609, roster, rho={"rush": 0.5, "rec": 0.0, "pass": 0.0})
+    assert set(p[p.pos == "QB"].player_id) == {"qb1"}     # 8 starts each: the incumbent keeps the job
+
+
 # ---------- receivers: "teammate out" ----------
 def wr_league(wr2_weeks, weeks=range(1, 9)):
     """AAA: wr1 (8 targets), wr2 (6, plays only wr2_weeks), wr3 (2: a backup), a TE (5) and a back."""

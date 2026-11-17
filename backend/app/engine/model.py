@@ -635,6 +635,7 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
     Out or Doubtful in past weeks, and sat_out: listed Questionable and didn't play): a backup's handful of snaps isn't
     a market, and projecting him split the team's passing between the two. While the starter is listed in
     `questionable`, his backups are kept (and his own past Questionable weeks don't count, as he's not back yet).
+    A mid-season arrival who started for his old team can take the job (redistribute.arriving_starter).
 
     With ftd_scale (the backtest's first-TD scale), every anytime-TD row gets a first-TD row too.
 
@@ -674,6 +675,13 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
             qbs = {c["pid"] for c in members if c["pos"] == "QB" and c["pid"] not in absent_ids}
             past = np.sort(df[(df.team == team) & (df.t < week_t)].t.unique())
             starter = rd.pick_starter(starts[starts.team == team], past, qbs, ruled, season, sat) if qbs else None
+            # a QB who arrived mid-season as his old team's starter has no start here for pick_starter to count
+            qb_hist = {c["pid"]: c["hist"] for c in members if c["pid"] in qbs}
+            arrivals = [pid for pid, h in qb_hist.items() if not (h.team == team).any()]
+            if arrivals:
+                n_starts = {pid: int((h.qb_start & (h.t >= season * 100)).sum()) if "qb_start" in h else 0
+                            for pid, h in qb_hist.items()}
+                starter = rd.arriving_starter(starter, n_starts, arrivals)
             # not absent: healthy members, and anyone active on another team's roster (traded away, not missing)
             active = {pid for pid, tm in roster.items() if not (tm == team and pid in absent_ids)}
             receivers = {c["pid"] for c in members if c["pid"] not in absent_ids}
