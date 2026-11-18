@@ -238,6 +238,6 @@ def read_slip_text(body: SlipTextIn, user: User = Depends(require_member), db: S
     Nothing is saved here."""
     draft = to_draft(slip_text.parse(body.text), db, datetime.utcnow())
     if not draft.legs:
-        draft.notes = ["Couldn't find the bet's legs in that screenshot. Reading works with bet365 and FanDuel slips; for "
+        draft.notes = ["Couldn't find the bet's legs in that screenshot. Reading works with bet365, FanDuel and DraftKings slips; for "
                        "others, add the bet by hand."]
     return draft

@@ -1,7 +1,7 @@
 """Reading a bet slip from its text (My bets → Add a bet → Upload a screenshot, when Claude isn't set up): the browser reads
 the screenshot with OCR (Tesseract.js, on the bettor's device) and sends only the text here. Each sportsbook lays its slip
 out differently, so each has its own rules; the result has bet_screens.SCHEMA's shape, and bet_screens.to_draft matches it
-to players exactly as it does Claude's reading. Rules exist for bet365 and FanDuel.
+to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel and DraftKings.
 """
 import re
 from typing import Optional
@@ -23,6 +23,8 @@ MARKETS = [
     (r"receptions|\bcatches\b", "recs"), (r"rec(eiving)? (yds|yards)|\breceiv", "rec"),
     (r"points ?\+ ?rebounds ?\+ ?assists|pts ?\+ ?reb\w* ?\+ ?a|\bpra\b", "pra"),   # "PTS + REB + A..." cut short
     (r"points ?\+ ?rebounds|pts ?\+ ?reb", "pr"), (r"points ?\+ ?assists|pts ?\+ ?ast", "pa"),
+    # combos the site does not project (checked after PRA, PR and PA): kept for marking by hand, never read as one stat
+    (r"rebounds ?\+ ?assists|reb\w* ?\+ ?ast|steals ?\+ ?blocks|stl ?\+ ?blk", "other"),
     (r"double.double", "dd"), (r"triple.double", "tpl"),
     (r"three|3.pt|3.point", "threes"), (r"rebounds", "reb"), (r"assists", "ast"), (r"steals", "stl"), (r"blocks", "blk"),
     (r"points", "pts"),
@@ -148,6 +150,40 @@ def _fanduel(lines: list[str]) -> list[dict]:
     return out
 
 
+# DraftKings' market names, longest first so "Points + Assists" wins over "Points"
+DK_MARKETS = re.compile(r"(?i)\b(points\s?\+\s?rebounds\s?\+\s?assists|points\s?\+\s?rebounds|points\s?\+\s?assists|rebounds\s?\+\s?assists"
+                        r"|steals\s?\+\s?blocks|three pointers made|threes made|points|rebounds|assists|steals|blocks|turnovers"
+                        r"|rushing\s?\+\s?receiving yards|passing yards|rushing yards|receiving yards|receptions|passing touchdowns"
+                        r"|longest reception|longest rush|anytime (?:td|touchdown) scorer|interceptions thrown|pass completions)\b")
+# what a leg needs on a line of its own: "35+", or "Over 24.5" / "O 24.5" for a main line
+DK_NEED = re.compile(r"(?i)(?<![\d.])(\d+(?:\.\d)?)\+|\b(over|under|o|u)\s?(\d+\.\d)\b")
+
+
+def _draftkings(lines: list[str]) -> list[dict]:
+    """DraftKings: what the leg needs ("35+") on one line, beside the icons OCR reads as noise ("© @ 20+0©"), then the player
+    and market on the next ("Luka Doncic Three Pointers Made"). The header's list of every leg's need ("35+, 20+, 5+") is
+    skipped: a leg's line has one."""
+    out = []
+    for ln, nxt in zip(lines, lines[1:]):
+        needs = DK_NEED.findall(ln)
+        market = DK_MARKETS.search(nxt)
+        if len(needs) != 1 or not market or re.search(r"(?i)parlay|wager|paid", ln):
+            continue
+        plus, side_word, ou_line = needs[0]
+        # the player is the capitalised words right before the market; icon noise before them ("ify", "a4,", "g") is dropped
+        words = nxt[:market.start()].split()
+        name = []
+        for w in reversed(words):
+            if not re.fullmatch(r"[A-Z][A-Za-z.'\-]*|[A-Z]{2,3}|(?:Jr|Sr)\.?|I{2,3}|IV", w):
+                break
+            name.insert(0, w)
+        name = _name(" ".join(name))
+        label = re.sub(r"\s+", " ", market.group(1)).title().replace(" + ", " + ")
+        need = f"{plus}+" if plus else f"{'Under' if side_word.lower().startswith('u') else 'Over'} {ou_line}"
+        out.append(_leg(name, label, f"{name} {need} {label}"))
+    return out
+
+
 def _moneylines(lines: list[str]) -> list[dict]:
     """bet365 moneylines: "LA Lakers -575" over "Money Line" (Apple's reader may put the price on a line of its own)."""
     out = []
@@ -175,8 +211,10 @@ def parse(text: str) -> dict:
     """The slip in bet_screens.SCHEMA's shape, from OCR text; legs it couldn't make out are simply missing."""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     low = text.lower()
-    fd, b365 = _fanduel(lines), _bet365(lines) + _moneylines(lines)
+    fd, b365, dk = _fanduel(lines), _bet365(lines) + _moneylines(lines), _draftkings(lines)
     legs = fd if len(fd) >= len(b365) else b365
+    if dk and ("draftkings" in low or len(dk) > len(legs)):
+        legs = dk
     book = "bet365" if "bet365" in low or (legs is b365 and legs) else "FanDuel" if "fanduel" in low or (legs is fd and legs) else None
     for b in ("DraftKings", "BetMGM", "Caesars", "ESPN BET", "Fanatics", "Hard Rock", "BetRivers"):
         if b.lower() in low:
