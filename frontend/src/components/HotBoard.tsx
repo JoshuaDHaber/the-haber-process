@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Filters, type GameWeather, type HotPick, type HotTeam } from "../api";
-import { isYesNo, KIND_LABEL, americanOdds, fmtProj, kickoff, matchup, pct, playLabel, signedPct } from "../format";
+import { flagChip, isYesNo, KIND_LABEL, americanOdds, fmtProj, kickoff, matchup, pct, playLabel, signedPct } from "../format";
 import { getLeague } from "../league";
 import { sidePick } from "../moneyline";
 import { useSort } from "../useSort";
@@ -148,7 +148,7 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
                       <div>
                         <b>{r.name}</b> <span className="pos-pill">{r.pos}</span> <span className="mut">{r.team}</span>
                         {r.status && <span className="q"> {r.status}</span>}
-                        {r.flagged && <span className="flag" title="Model and market disagree strongly, so Best props hides this price">large gap</span>}
+                        {r.flagged && <span className="flag" title={`${flagChip(r).title}, so Best props hides this price`}>{flagChip(r).label}</span>}
                         <br /><span className="mut">{matchup(r.opp, r.home)} · {kickoff(r.gameday, r.gametime)}</span>
                         {!isYesNo(r.kind) && <WeatherChip weather={weather[r.game_id]} wx={r.wx} />}
                         <MatchupGrade kind={r.kind} pos={r.pos} opp={r.opp} rank={r.dvp_rank} n={r.dvp_n} side={r.side} quiet />

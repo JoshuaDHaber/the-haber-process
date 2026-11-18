@@ -34,7 +34,7 @@ export default function Controls({ filters, onChange, games, showPickControls: p
     ...(filters.q.trim() ? [[`"${filters.q.trim()}"`, { q: "" }] as [string, Partial<Filters>]] : []),
     ...(picks && filters.minEv !== DEFAULT_FILTERS.minEv ? [[`Min EV ${signedPct(filters.minEv)}`, { minEv: DEFAULT_FILTERS.minEv }] as [string, Partial<Filters>]] : []),
     ...(picks && filters.marketWeight !== null ? [[`Trust market ${pct(filters.marketWeight, 0)}`, { marketWeight: null }] as [string, Partial<Filters>]] : []),
-    ...(picks && filters.flagged ? [["Large gaps shown", { flagged: false }] as [string, Partial<Filters>]] : []),
+    ...(picks && filters.flagged ? [["Flagged shown", { flagged: false }] as [string, Partial<Filters>]] : []),
   ];
   return (
     <section className="controls" aria-label="Filters">
@@ -92,7 +92,7 @@ export default function Controls({ filters, onChange, games, showPickControls: p
                 </label>
                 <label className="check">
                   <input type="checkbox" checked={filters.flagged} onChange={(e) => set({ flagged: e.target.checked })} />
-                  Show large gaps <Info term="gaps" />
+                  Show flagged plays <Info term="gaps" />
                 </label>
               </div>
             )}

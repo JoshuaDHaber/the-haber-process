@@ -15,7 +15,7 @@ from sqlalchemy import select
 from . import market_fit
 from .db import PickLog, Run, current_lines, proj_frame
 from .engine import odds as odds_math
-from .engine.picks import build_picks
+from .engine.picks import MAX_EV, build_picks
 from .engine.td import YES_NO
 
 ET = ZoneInfo("America/New_York")
@@ -37,14 +37,15 @@ _kickoff_utc = market_fit.kickoff_utc
 def board_prices(session, sport: str, proj: pd.DataFrame, lines: pd.DataFrame, dists_: dict) -> pd.DataFrame:
     """The board as a visitor sees it by default: fitted market weights and book weights."""
     return build_picks(proj, lines, MARKET_WEIGHT, dists=dists_, book_weights=market_fit.book_weights(session, sport),
-                       fitted=market_fit.market_weights(session, sport))
+                       fitted=market_fit.market_weights(session, sport), max_ev=MAX_EV if sport == "nba" else None)
 
 
 def log_row(row, p, now: datetime) -> None:
     """Copy one priced pick onto its pick_log row; the first time it's on the board (EV 3%+, no flag) is kept too."""
     row.gameday, row.gametime, row.name, row.pos, row.team = str(p.gameday), str(p.gametime), p.name, p.pos, p.team
     row.line, row.odds, row.book = float(p.line), int(p.odds), p.book
-    row.mu, row.prob, row.p_model, row.p_mkt, row.ev = (float(x) for x in (p.mu, p.prob, p.p_model, p.p_mkt, p.ev))
+    # p_model is the model's chance before its calibration curve, so the curve refits on what the model itself said
+    row.mu, row.prob, row.p_model, row.p_mkt, row.ev = (float(x) for x in (p.mu, p.prob, market_fit.raw_chance(p), p.p_mkt, p.ev))
     hours = getattr(p, "hours", None)
     row.hours = None if hours is None or pd.isna(hours) else float(hours)
     row.flagged, row.snapped_at = bool(p.flagged), now

@@ -262,9 +262,12 @@ def test_nba_meta_lists_the_slate_and_books(nba_client):
 
 
 def test_nba_picks_moneylines_and_projections(nba_client):
-    picks = nba_client.get("/api/nba/picks", params={"min_ev": -1}).json()
+    picks = nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
     over = next(p for p in picks if p["side"] == "Over")
     assert over["kind"] == "pts" and over["line"] == 24.5 and over["prob"] > 0.5
+    # one book and no fitted weights: an edge over 20%, hidden unless flagged picks are asked for
+    assert over["ev"] > 0.2 and over["flag"] == "edge too big"
+    assert not [p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1}).json() if p["side"] == "Over"]
     [ml] = nba_client.get("/api/nba/moneylines").json()
     away, home = ml["sides"]
     assert (away["team"], home["team"]) == ("BOS", "DET") and home["odds"] == -130 and ml["total"] == 221.5
@@ -272,7 +275,7 @@ def test_nba_picks_moneylines_and_projections(nba_client):
     assert len(nba_client.get("/api/nba/projections", params={"kind": "reb"}).json()) == 1
     # the date filter: the game's own day keeps it, another day has nothing
     day = over["gameday"]
-    assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": day}).json()
+    assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": day, "include_flagged": True}).json()
     assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": "1999-01-01"}).json() == []
     assert nba_client.get("/api/nba/projections", params={"kind": "reb", "gameday": "1999-01-01"}).json() == []
     # the NFL board never sees NBA quotes

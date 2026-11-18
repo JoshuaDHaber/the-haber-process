@@ -29,6 +29,9 @@ TABLES = {"nfl": (PickLog, Run), "nba": (NbaPickLog, NbaRun)}
 # book weights are fitted on recent line history: six NFL weeks, two NBA weeks (a daily slate and three fetches a day
 # make NBA history about ten times denser, and the server has 1 GB)
 BOOK_WINDOW_DAYS = {"nfl": 42, "nba": 14}
+# sports whose model chances go through a fitted calibration curve before the blend (engine/market.fit_calibration).
+# The NFL's few hundred graded picks per market are too few to fit one yet
+CALIBRATED = {"nba"}
 _state: dict = {}         # sport -> the stored fit, read once per process until clear_cache()
 
 
@@ -74,8 +77,15 @@ def dists(run) -> dict:
 SNAP_COLS = ("line", "odds", "book", "p_model", "p_mkt")
 
 
+def raw_chance(p) -> float:
+    """The model's chance before its calibration curve (engine/picks.build_picks' p_raw): what pick_snaps and the
+    pick logs store, so market.fit_calibration refits on the model itself and never on its own output."""
+    v = getattr(p, "p_raw", None)
+    return float(p.p_model if v is None or pd.isna(v) else v)
+
+
 def _sig(x) -> tuple:
-    return (round(float(x.line), 2), int(x.odds), x.book, round(float(x.p_model), 3), round(float(x.p_mkt), 3))
+    return (round(float(x.line), 2), int(x.odds), x.book, round(raw_chance(x), 3), round(float(x.p_mkt), 3))
 
 
 def log_snaps(session, sport: str, picks: pd.DataFrame, now: datetime) -> int:
@@ -93,7 +103,7 @@ def log_snaps(session, sport: str, picks: pd.DataFrame, now: datetime) -> int:
             continue
         hours = getattr(p, "hours", None)
         session.add(PickSnap(sport=sport, snapped_at=now, game_id=p.game_id, player_id=p.player_id, kind=p.kind, side=p.side,
-                             line=float(p.line), odds=int(p.odds), book=p.book, mu=float(p.mu), p_model=float(p.p_model),
+                             line=float(p.line), odds=int(p.odds), book=p.book, mu=float(p.mu), p_model=raw_chance(p),
                              p_mkt=float(p.p_mkt), ev=float(p.ev), flagged=bool(p.flagged),
                              hours=None if hours is None or pd.isna(hours) else float(hours)))
         n += 1
@@ -270,7 +280,10 @@ def refit(session, sport: str, now: Optional[datetime] = None, log: Callable[[st
     if not hist.empty:
         hist = hist[hist.fetched_at < hist.game_id.map(started)]
     bw = mkt.fit_book_weights(hist)
-    mw = mkt.fit_market_weights(fit_rows(session, sport))
+    rows = fit_rows(session, sport)
+    mw = mkt.fit_market_weights(rows)
+    if sport in CALIBRATED:
+        mw["calibration"] = mkt.fit_calibration(rows)
     value = dict(book_weights=bw, market_weights=mw, fitted_at=now.isoformat())
     row = session.get(Setting, _key(sport)) or Setting(key=_key(sport))
     row.value = value

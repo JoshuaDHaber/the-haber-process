@@ -114,8 +114,9 @@ export interface Pick {
   p_model: number; p_mkt: number; prob: number; ev: number; kelly: number; books: number;
   edge_yds: number; flagged: boolean; last5: number[];
   wx?: number | null;
-  /** Why it's flagged (hidden by default): "large gap". Older snapshots lack it. */
-  flag?: "" | "large gap";
+  /** Why it's flagged (hidden by default): model and market far apart, a double/triple-double Yes longer than +400,
+   *  or (NBA) EV over 20%. Older snapshots lack it. */
+  flag?: "" | "large gap" | "long shot" | "edge too big";
   /** Same-position rotation receivers in their first game out (receiving yards). Context only, not a flag. */
   teammate_out?: string;
   /** The market weight it was priced with (the fitted one for its market and fetch time, or the slider's). */

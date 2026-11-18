@@ -348,3 +348,58 @@ def weight_for(table: Optional[dict], kind: str, hours: Optional[float], default
         return float(table.get("w", default))
     b = (k.get("buckets") or {}).get(bucket(hours))
     return float(b["w"] if b else k["w"])
+
+
+# ---------- recalibrating the model's own chance, fitted ----------
+# The market weight shrinks the model toward the market by the same share at every chance, so it can't fix a model that
+# is too sure of itself or that leans one way. In the first month of NBA grading the combo markets (PA, PRA, PR) had
+# almost no signal past the line: whether the model said 26% or 60%, overs went 47-49%. Points were too sure too
+# (21% said, 30% hit). A logistic curve on the logit of the model's chance, per market, fixes both before the blend:
+# fitted on graded picks from Oct 20 to Nov 3 and tested on Nov 4 to 18, it beat the raw model's log loss in every
+# main market and turned the main-prop board from -0.5% to +2.1% ROI at the same size. The market weight stays fitted on
+# the raw chance (the weights refitted on the curve leaned on a market bias that didn't hold, and doubled the board).
+# Double- and triple-doubles keep their own curve (model.fit_doubles): another one on top made them worse.
+CAL_PRIOR_N = 150        # graded picks a market needs before its own curve outweighs no change (a = 0, b = 1)
+CAL_MIN_N = 100          # fewer graded picks than this and the market isn't recalibrated at all
+CAL_B_RANGE = (0.0, 1.5)  # the slope: 0 = the model knows nothing here, 1 = as sure as it says, above 1 = not sure enough
+
+
+def _logit(p):
+    p = np.clip(np.asarray(p, float), 1e-4, 1 - 1e-4)
+    return np.log(p / (1 - p))
+
+
+def fit_calibration(rows: pd.DataFrame, n0: float = CAL_PRIOR_N, min_n: int = CAL_MIN_N) -> dict:
+    """kind -> {a, b, n}: logit(p) = a + b * logit(model's chance), fitted (log loss) on graded over (or Yes) sides
+    with kind, p_model and y, pulled toward no change (a = 0, b = 1) by n0 picks. Markets with fewer than min_n rows
+    are left out, and so are the yes/no markets (YES_NO)."""
+    out = {}
+    if rows.empty:
+        return out
+    for kind, g in rows.groupby("kind"):
+        n = len(g)
+        if kind in YES_NO:
+            continue
+        y = g.y.to_numpy(float)
+        if n < min_n or y.min() == y.max():
+            continue
+        x = _logit(g.p_model.to_numpy(float))
+        nll = lambda ab: float(np.mean(np.logaddexp(0, ab[0] + ab[1] * x) - y * (ab[0] + ab[1] * x)))  # noqa: E731
+        a, b = minimize(nll, [0.0, 1.0]).x
+        s = n / (n + n0)
+        out[str(kind)] = dict(a=round(float(s * a), 4), b=round(float(np.clip(s * b + (1 - s), *CAL_B_RANGE)), 4), n=int(n))
+    return out
+
+
+def calibrate(p_over: float, p_under: float, curve: Optional[dict]) -> tuple[float, float]:
+    """The model's (over, under) chances through a market's curve (unchanged without one). The under goes through the
+    curve as 1 - under, so a whole-number line keeps its push chance between the two."""
+    if not curve:
+        return p_over, p_under
+    f = lambda p: float(1 / (1 + np.exp(-(curve["a"] + curve["b"] * _logit(p)))))  # noqa: E731
+    return f(p_over), 1 - f(1 - p_under)
+
+
+def curve_for(table: Optional[dict], kind: str) -> Optional[dict]:
+    """A market's calibration curve from the fitted market weights (fit_market_weights' table), if it has one."""
+    return ((table or {}).get("calibration") or {}).get(kind)

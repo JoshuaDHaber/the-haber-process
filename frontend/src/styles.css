@@ -45,7 +45,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover, tr.clickable:focus { backg
 .group-toggle { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; cursor: pointer; }
 .cards-toggle { display: none; }
 .flag.related { background: var(--card); color: var(--mut); border: 1px solid var(--line); }
-.flag { background: var(--warn-bg); color: var(--warn); font-size: 11px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+.flag { background: var(--warn-bg); color: var(--warn); font-size: 11px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; white-space: nowrap; }
 .flag.with { background: var(--card); color: var(--good); border: 1px solid currentColor; }
 .flag.against { background: var(--card); color: var(--bad); border: 1px solid currentColor; }
 .beats { font-size: 10px; font-weight: 700; color: var(--good); border: 1px solid currentColor; border-radius: 5px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }

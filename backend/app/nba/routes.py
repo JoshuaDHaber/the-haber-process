@@ -18,7 +18,7 @@ from ..engine import moneyline as mlm
 from ..engine import odds
 from ..engine.ladder import build_ladder, ladder_curve
 from ..engine.market import weight_for
-from ..engine.picks import best_picks, build_picks
+from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
 from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, LadderOut,
                        MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
@@ -103,7 +103,8 @@ def _priced(db: Session, run: NbaRun, version: tuple, w: Optional[float]) -> tup
             _priced_cache.clear()   # only the newest odds and run are asked for
             proj = _proj_frame(db, run.id)
             priced = build_picks(proj, current_lines(db, NbaOddsLine), w, dists=_dists(run), best_only=False,
-                                 book_weights=market_fit.book_weights(db, "nba"), fitted=market_fit.market_weights(db, "nba"))
+                                 book_weights=market_fit.book_weights(db, "nba"), fitted=market_fit.market_weights(db, "nba"),
+                                 max_ev=MAX_EV)
             _priced_cache[key] = proj, market_fit.add_moves(db, "nba", priced, proj, _dists(run))
         return _priced_cache[key]
 

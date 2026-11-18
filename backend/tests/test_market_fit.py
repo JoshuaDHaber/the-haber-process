@@ -179,3 +179,22 @@ def test_tracked_bet_legs_get_the_close_at_their_own_line(monkeypatch):
         s.query(Bet).delete()
         s.delete(s.get(User, user.id))
         s.commit()
+
+
+def test_nba_refits_a_calibration_curve_and_the_logs_keep_the_raw_chance(monkeypatch):
+    import numpy as np
+    rng = np.random.default_rng(5)
+    n = 2000
+    pm = rng.uniform(0.1, 0.9, n)
+    y = (rng.uniform(size=n) < 0.5 + 0.3 * (pm - 0.5)).astype(float)   # the model is far surer than it should be
+    rows = pd.DataFrame(dict(kind="pts", hours=2.0, p_model=pm, p_mkt=0.5, y=y))
+    monkeypatch.setattr(market_fit, "fit_rows", lambda s, sport: rows)
+    with SessionLocal() as s:
+        nba = market_fit.refit(s, "nba", now=AFTER, log=lambda _: None)["market_weights"]
+        nfl = market_fit.refit(s, "nfl", now=AFTER, log=lambda _: None)["market_weights"]
+    assert nba["calibration"]["pts"]["b"] < 0.6 and "calibration" not in nfl
+    # the board shows the calibrated chance, but the pick log and pick_snaps store the model's own
+    board(monkeypatch, [dict(pick("Over", 45.5, -110, 0.06), p_model=0.55, p_raw=0.7)])
+    with SessionLocal() as s:
+        grading.snapshot_board(s, now=EARLY)
+        assert s.query(PickLog).one().p_model == 0.7 and s.query(PickSnap).one().p_model == 0.7
