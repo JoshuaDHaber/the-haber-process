@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api, type EndzoneRow, type Game, type Pick } from "../api";
 import { americanOdds, kickoff, pct, signedPct } from "../format";
-import { toAmerican } from "../slip";
+import { chance, fair, meterWidth } from "../promo";
 import { useSort } from "../useSort";
 import { BookName } from "./BookBadge";
 import HowToRead from "./HowToRead";
@@ -12,14 +12,11 @@ import Skeleton from "./Skeleton";
 import SortBar from "./SortBar";
 import { PickAvatar } from "./TeamLogo";
 
-/** "+900": the price at which a chance breaks even. */
-const fair = (p: number) => americanOdds(Math.round(toAmerican(1 / p)));
-
 type Select = (r: EndzoneRow) => void;
 
 /** One entry: who (a player, the rest of an offense, or a defense), his anytime TD at the book, how long his touchdowns run, how
  *  often a touchdown of his is the game's longest, and his chance of the longest TD. A player's row opens his anytime-TD drawer. */
-function Row({ r, gameId, onSelect }: { r: EndzoneRow; gameId: string; onSelect: Select }) {
+function Row({ r, gameId, onSelect, top }: { r: EndzoneRow; gameId: string; onSelect: Select; top: number }) {
   const p = r.pick;
   const player = r.kind === "player";
   const open = player ? () => onSelect(r) : undefined;
@@ -40,7 +37,7 @@ function Row({ r, gameId, onSelect }: { r: EndzoneRow; gameId: string; onSelect:
         {p && <><br /><span className="mut">{americanOdds(p.odds)} · <BookName book={p.book} size={14} /></span></>}</td>
       <td data-label="Median TD">{r.median_td == null ? <span className="mut">–</span> : <>{Math.round(r.median_td)} yds</>}</td>
       <td data-label="If he scores">{pct(r.p_long_if_td, 0)}</td>
-      <td data-label="Longest TD"><b>{pct(r.p_long, r.p_long < 0.1 ? 1 : 0)}</b><span className="meter" aria-hidden><i style={{ width: `${Math.min(100, r.p_long * 400)}%` }} /></span>
+      <td data-label="Longest TD"><b>{chance(r.p_long)}</b><span className="meter" aria-hidden><i style={{ width: meterWidth(r.p_long, top) }} /></span>
         <span className="mut">fair {fair(r.p_long)}</span></td>
       <td className={`c-ev${p ? "" : " no-price"}`}>{p ? <span className={`ev-pill${p.ev < 0 ? " neg" : ""}`} title="EV of his anytime TD at this price">{signedPct(p.ev)}</span> : <span className="mut">–</span>}</td>
     </tr>
@@ -57,6 +54,7 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
   const { sorted, toggle, arrow } = useSort(rows, "p_long");
   const shown = games.find((g) => g.game_id === b?.game_id);
   const select: Select = (r) => r.player_id && onSelect(r.player_id, r.pick);
+  const top = Math.max(0, ...rows.map((r) => r.p_long));
   return (
     <>
       <div className="hot-bar">
@@ -87,15 +85,15 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
           <h3 id="endzone-h" className="sub-h">{b!.label} <span className="mut">· {kickoff(b!.gameday, b!.gametime)}
             {b!.median_longest != null && <> · longest TD usually {Math.round(b!.median_longest)} yds</>}
             {b!.total != null && <> · total {b!.total_assumed ? <span title="No total posted for this game yet: the league's average game">{Math.round(b!.total)} (league average)</span> : b!.total}</>}</span></h3>
-          <div className="card scroll cards">
-            <table className="t-hot">
+          <div className={`card scroll cards${q.isPlaceholderData ? " refreshing" : ""}`} aria-busy={q.isPlaceholderData}>
+            <table className="t-hot t-endzone">
               <thead>
                 <tr>
                   <th scope="col">Player</th><th scope="col">Anytime TD</th><th scope="col">Median TD</th>
-                  <th scope="col">If he scores</th><th scope="col">Longest TD</th><th scope="col">EV <Info term="ev" /></th>
+                  <th scope="col">If he scores</th><th scope="col">Longest TD</th><th scope="col">TD EV <Info term="ev" /></th>
                 </tr>
               </thead>
-              <tbody>{sorted.map((r) => <Row key={`${r.kind}-${r.player_id ?? r.team}`} r={r} gameId={b!.game_id!} onSelect={select} />)}</tbody>
+              <tbody>{sorted.map((r) => <Row key={`${r.kind}-${r.player_id ?? r.team}`} r={r} gameId={b!.game_id!} onSelect={select} top={top} />)}</tbody>
             </table>
           </div>
         </section>

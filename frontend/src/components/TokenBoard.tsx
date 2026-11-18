@@ -16,11 +16,11 @@ import { PickAvatar } from "./TeamLogo";
 
 /** Per league: the leads an early-win promo might ask for, FanDuel's own (backend nba/lead.THRESHOLD, engine/early_win.THRESHOLD),
  *  and how far back the largest leads the chances are fitted on go. NFL leads under 14 run high (touchdowns jump the score by 7). */
-const LEAD_SETUP: Record<League, { leads: number[]; fanduel: number; since: string }> = {
-  nba: { leads: [5, 8, 10, 12, 15], fanduel: 10, since: "2018-19" },
-  nfl: { leads: [14, 17, 21], fanduel: 17, since: "2018" },
+const LEAD_SETUP: Record<League, { leads: number[]; fanduel: number; since: string; news: string }> = {
+  nba: { leads: [5, 8, 10, 12, 15], fanduel: 10, since: "2018-19", news: "an injury or rest day" },
+  nfl: { leads: [14, 17, 21], fanduel: 17, since: "2018", news: "an injury or a quarterback change" },
 };
-/** Model and market this far apart (in win chance) usually means news the model hasn't seen: an injury or a rest day. */
+/** Model and market this far apart (in win chance) usually means news the model hasn't seen (LEAD_SETUP's news). */
 const SPLIT = 0.12;
 
 type Row = { g: MoneylineGame; s: MoneylineSide; opp: string; name: string; ev: number; p_cash: number; p_lead: number };
@@ -36,7 +36,7 @@ function SeasonRecord({ s }: { s: MoneylineSide }) {
  *  the lead or a win) and that bet's EV at the board's book, best first. */
 export default function TokenBoard({ book, marketWeight, gameIds, pills }: { book: string; marketWeight: number | null; gameIds: string[]; pills: ReactNode }) {
   const { league } = useLeague();
-  const { leads, fanduel, since } = LEAD_SETUP[league];
+  const { leads, fanduel, since, news } = LEAD_SETUP[league];
   const [lead, setLead] = useState<number>(fanduel);
   const q = useQuery({ queryKey: ["moneylines", book, marketWeight, lead], queryFn: () => api.moneylines(book, marketWeight, lead), placeholderData: (p) => p });
   const rows = useMemo<Row[]>(() => (q.data ?? []).filter((g) => gameIds.includes(g.game_id)).flatMap((g) => g.sides
@@ -58,14 +58,14 @@ export default function TokenBoard({ book, marketWeight, gameIds, pills }: { boo
           <li>An early-win token pays a moneyline as a winner once the team goes up by {lead}, whatever happens after. So the bet cashes if the team goes up {lead} <b>or</b> wins.</li>
           <li><b>Up {lead}</b> is the chance the team leads by {lead}+ at some point; <b>Cashes</b> adds the games it wins without ever getting there. Both come from the market spread, fitted on every game's largest lead since {since}.</li>
           <li><b>Token EV</b> <Info term="ev" /> is the bet's return with the token at the price shown. It's highest on underdogs: a favorite that goes up {lead} usually wins anyway, so the token adds little.</li>
-          <li><b>Model ≠ market</b> marks a game where the team model and the books disagree by {Math.round(SPLIT * 100)}+ points, usually an injury or rest day. Check the news before trusting either.</li>
+          <li><b>Model ≠ market</b> marks a game where the team model and the books disagree by {Math.round(SPLIT * 100)}+ points, usually {news}. Check the news before trusting either.</li>
         </ol>
       </HowToRead>
       {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load the moneylines.</p> : !sorted.length ? (
         <div className="card empty">No games to price yet. Lead chances come with each sync once a game has a spread.</div>
       ) : <>
         <SortBar toggle={toggle} arrow={arrow} options={[["ev", "Token EV"], ["p_cash", "Cashes"], ["p_lead", `Up ${lead}`], ["name", "Team"]]} />
-        <div className="card scroll cards">
+        <div className={`card scroll cards${q.isPlaceholderData ? " refreshing" : ""}`} aria-busy={q.isPlaceholderData}>
           <table className="t-hot t-hot-teams">
             <thead>
               <tr>
