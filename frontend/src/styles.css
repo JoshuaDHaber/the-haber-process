@@ -947,6 +947,15 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .slip-tracked-actions { display: flex; gap: 16px; flex-wrap: wrap; }
 .slip-total .slip-bonus input { width: auto; padding: 0; margin: 0; accent-color: var(--acc); }
 .track-bonus { align-items: flex-start; margin: 4px 0 2px; } .track-bonus input { margin-top: 2px; flex: none; accent-color: var(--acc); }
+/* a bet's promo (PromoFields): one of none / bonus bet / profit boost / no sweat, with its amount beneath */
+.promo { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px; }
+.promo > .auth-label, .bet-edit .promo .auth-label { display: flex; flex-direction: column; gap: 4px; width: auto; }
+.promo-kinds { margin: 0; padding-bottom: 0; flex-wrap: wrap; align-self: flex-start; }
+.promo-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.promo .promo-row .auth-label { width: 150px; flex: none; }
+.promo-input { display: flex; align-items: center; gap: 6px; } .promo-input .auth-input { width: 80px; }
+.promo-why { font-size: 12px; margin: 0; flex: 1 1 200px; }
+.promo .err { font-size: 12px; margin: 0; }
 .bet-pill { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--chip); color: var(--mut); white-space: nowrap; }
 .add-results .bet-pill, .add-player .bet-pill { margin-left: 6px; }
 .add-late { font-size: 13px; margin: 4px 0 0; }

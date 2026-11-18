@@ -131,7 +131,7 @@ export default function BetSlip() {
     const odds = asParlay ? parlay(ls, 1).american : ls[0].odds;
     setTracked((t) => ({ ...t, [book]: { key, ids: [], asParlay, odds, stake, bonus: isBonus } }));   // claimed at once, so a second click can't double it
     try {
-      const saved = await trackBets(book, ls, asParlay, stake, odds, [], isBonus);
+      const saved = await trackBets(book, ls, asParlay, stake, odds, [], { bonus: isBonus });
       setTracked((t) => ({ ...t, [book]: { key, ids: saved.map((b) => b.id), asParlay, odds, stake, bonus: isBonus } }));
       qc.invalidateQueries({ queryKey: ["my-bets"] });
     } catch (e) { setTracked((t) => ({ ...t, [book]: { key, error: (e as Error).message } })); }

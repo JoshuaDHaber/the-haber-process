@@ -3,11 +3,12 @@ import { IconPhoto, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
-import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, money, myBets, parseOdds, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
-  winReturn, type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
+import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
+  type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
 import { isYesNo, KIND_LABEL, namesItself, americanOdds, playLabel } from "../format";
 import { toAmerican, toDecimal, toWin } from "../slip";
 import { useDebounced } from "../useDebounced";
+import PromoFields from "./PromoFields";
 import Sheet from "./Sheet";
 import SidePill from "./SidePill";
 import TagInput from "./TagInput";
@@ -41,7 +42,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const [league, setLeague] = useState<"nfl" | "nba" | "oth">(defaultLeague);
   const [book, setBook] = useState("");
   const [stake, setStake] = useState("");
-  const [bonus, setBonus] = useState(false);
+  const [promo, setPromo] = useState(NO_PROMO);
   const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -97,18 +98,18 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const tooOld = startsAt.getTime() < Date.now() - LATE_DAYS * 86_400_000;
   // started already: it's still added, marked late (the server decides; this only says so)
   const late = mode === "prop" ? allLegs.some((l) => !l.custom && l.player.started) : startsAt.getTime() <= Date.now();
-  const ready = stakeOk && book.trim() !== "" && (mode === "prop" ? allLegs.length > 0 && !!propOdds : description.trim().length >= 3 && !!otherOdds && !tooOld);
+  const ready = stakeOk && promoReady(promo, stakeN) && book.trim() !== "" && (mode === "prop" ? allLegs.length > 0 && !!propOdds : description.trim().length >= 3 && !!otherOdds && !tooOld);
   const payOdds = mode === "prop" ? propOdds : otherOdds;
-  const pays = stakeOk && payOdds ? winReturn(stakeN, toWin(payOdds, stakeN), bonus) : null;
+  const pays = stakeOk && payOdds ? promoReturn(stakeN, toWin(payOdds, stakeN), promo) : null;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!ready) return;
     setBusy(true); setProblem("");
     try {
-      const s = Math.round(stakeN * 100) / 100;
-      if (mode === "prop") await addPropBet(book.trim(), allLegs, s, parlayN ?? 0, tags, bonus);
-      else await addCustomBet({ book: book.trim(), description: description.trim(), startsAt: startsAt.toISOString(), league, odds: otherOdds!, stake: s, tags, bonus });
+      const s = Math.round(stakeN * 100) / 100, p = promoBody(promo, s);
+      if (mode === "prop") await addPropBet(book.trim(), allLegs, s, parlayN ?? 0, tags, p);
+      else await addCustomBet({ book: book.trim(), description: description.trim(), startsAt: startsAt.toISOString(), league, odds: otherOdds!, stake: s, tags, promo: p });
       qc.invalidateQueries({ queryKey: ["my-bets"] });
       setDone(true);
     } catch (err) { setProblem((err as Error).message); } finally { setBusy(false); }
@@ -124,7 +125,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
     const graded = legsIn.filter((l) => !l.custom);
     if (d.book) setBook(d.book);
     setStake(d.stake ? String(d.stake) : "");   // the slip's, or blank: never the last upload's
-    setBonus(!!d.stake && !!d.bonus_stake && d.bonus_stake >= d.stake);   // all of it a bonus bet (part of one is only noted)
+    // all of it a bonus bet (part of one is only noted), or a boost or no-sweat bet the reader saw
+    setPromo(!!d.stake && !!d.bonus_stake && d.bonus_stake >= d.stake ? { ...NO_PROMO, kind: "bonus" }
+      : d.boost ? { ...NO_PROMO, kind: "boost", boost: String(d.boost) } : d.no_sweat ? { ...NO_PROMO, kind: "no_sweat" } : NO_PROMO);
     setPlayer(null); setQ(""); setProblem("");
     if (!graded.length) {
       // nothing the site grades: an other bet, in the slip's words
@@ -277,15 +280,13 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
           </label>
           <label className="auth-label">Stake<input className="auth-input" inputMode="decimal" value={stake} placeholder="$0" onChange={(e) => setStake(e.target.value)} /></label>
         </div>
-        <label className="check track-bonus">
-          <input type="checkbox" checked={bonus} onChange={(e) => setBonus(e.target.checked)} />
-          <span>Bonus bet <span className="mut">(a free bet from the book: not counted as money you staked, and a win pays only the winnings)</span></span>
-        </label>
+        <PromoFields promo={promo} onChange={setPromo} stake={stakeOk ? stakeN : 0} book={book.trim() || undefined} />
         <label className="auth-label" htmlFor="add-tags">Tags <span className="mut">(optional)</span></label>
         <TagInput id="add-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
         {late && !tooOld && <p className="warn add-late">{mode === "prop" ? "This game has started" : "This has started"}, so it's added
           as <b>late</b>: My bets marks it, since you may have known how it went. It's graded like any other bet.</p>}
-        <p className="mut track-pays">{pays != null ? <>Pays <b>{money(pays)}</b> if it wins</> : "Fill in the bet, sportsbook, odds and stake"}</p>
+        <p className="mut track-pays">{!promoReady(promo, stakeN) ? (promo.kind === "boost" ? "Enter the boost, like 50%" : "Enter the refund in dollars")
+          : pays != null ? <>Pays <b>{money(pays)}</b> if it wins</> : "Fill in the bet, sportsbook, odds and stake"}</p>
         {problem && <p className="err auth-problem" role="alert">{problem}</p>}
         <button className="primary" disabled={!ready || busy}>{busy ? "Saving…" : mode === "prop" && allLegs.length > 1 ? `Add ${allLegs.length}-leg parlay` : "Add bet"}</button>
       </form>

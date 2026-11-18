@@ -114,6 +114,31 @@ def test_settle_bonus_bets():
     assert bets.cost(won) == 0 and (s.staked, s.bonus_staked, s.profit, s.roi) == (0, 10, 15.0, None)
 
 
+def test_settle_profit_boosts_and_no_sweat_bets():
+    """A profit boost multiplies the winnings (the stake comes back unboosted), dropped legs included; a lost no-sweat bet
+    earns its refund back as a bonus bet, which isn't profit until it's bet."""
+    b = make(odds=+150, results=("win",))
+    b.boost = 50
+    bets.settle(b)
+    assert b.payout == 32.5                                   # $15 of winnings x 1.5, plus the $10 stake
+    p = make(odds=+600, results=("win", "push"), leg_odds=(+100, +100))
+    p.boost = 25
+    bets.settle(p)
+    assert p.payout == pytest.approx(10 + 10 * 2.5 * 1.25)    # 7.0 / 2.0 = 3.5 decimal, its $25 of winnings boosted
+    for r, payout, back in (("loss", 0.0, 10.0), ("win", 25.0, 0.0), ("push", 10.0, 0.0)):
+        n = make(odds=+150, results=(r,))
+        n.no_sweat = 10.0
+        bets.settle(n)
+        n.settled_at = datetime.utcnow()
+        assert (n.payout, bets.refund(n)) == (payout, back)
+    lost = make(odds=+150, results=("loss",))
+    lost.no_sweat, lost.stake = 25.0, 10.0
+    bets.settle(lost)
+    lost.settled_at = datetime.utcnow()
+    s = bets.summarize([lost])
+    assert bets.refund(lost) == 10.0 and (s.profit, s.staked, s.refunds) == (-10.0, 10.0, 10.0)   # never more than the stake
+
+
 # ---------- the API ----------
 def test_track_and_list(sent):
     with member(sent, "tracker@example.com", "198.51.100.1") as c:
@@ -160,6 +185,36 @@ def test_bonus_bets_count_profit_but_not_stake(sent):
         lost = c.patch(f"/api/me/bets/{free['id']}", json={"bonus": True, "status": "lost"}).json()
         assert (lost["payout"], lost["profit"]) == (0.0, 0.0)
         assert "bonus_bet" in c.get("/api/me/bets.csv").text.splitlines()[0]
+
+
+def test_profit_boosts_and_no_sweat_bets(sent):
+    with member(sent, "promo@example.com", "198.51.100.41") as c:
+        post = lambda **body: c.post("/api/me/bets", json={"book": "DraftKings", "kind": "single", "stake": 20, "legs": [leg(odds=100)], **body})
+        boost = post(boost=50).json()
+        assert (boost["boost"], boost["odds"], boost["to_pay"]) == (50, 100, 50.0)   # $20 of winnings, boosted to $30
+        assert post(boost=0).json()["boost"] is None
+        assert post(boost=501).status_code == 422
+        assert post(boost=25, bonus=True).status_code == 422                         # one promo a bet
+        assert post(no_sweat=10, boost=25).status_code == 422
+        ns = post(no_sweat=50).json()
+        assert ns["no_sweat"] == 20.0 and ns["refund"] == 0.0                        # refunded up to the stake
+        r = c.patch(f"/api/me/bets/{ns['id']}", json={"status": "lost"}).json()
+        assert (r["profit"], r["refund"]) == (-20.0, 20.0)
+        r = c.patch(f"/api/me/bets/{ns['id']}", json={"stake": 15}).json()
+        assert (r["no_sweat"], r["refund"]) == (15.0, 15.0)
+        r = c.patch(f"/api/me/bets/{boost['id']}", json={"status": "won"}).json()
+        assert (r["payout"], r["profit"]) == (50.0, 30.0)
+        # switching promos: the old one is taken off in the same edit
+        r = c.patch(f"/api/me/bets/{boost['id']}", json={"bonus": True, "boost": 0, "no_sweat": 0}).json()
+        assert (r["bonus"], r["boost"], r["payout"], r["profit"]) == (True, None, 20.0, 20.0)   # a bonus bet: the winnings only, unboosted
+        assert c.patch(f"/api/me/bets/{boost['id']}", json={"boost": 20}).status_code == 422
+        s = c.get("/api/me/bets").json()["summary"]
+        assert s["refunds"] == 15.0
+        head, *rows = c.get("/api/me/bets.csv").text.splitlines()
+        assert "profit_boost_pct" in head and "no_sweat_refund" in head
+        custom = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "custom", "stake": 10, "odds": 120, "description": "Chiefs -3.5",
+                                              "starts_at": (datetime.utcnow() + timedelta(days=1)).isoformat(), "boost": 30}).json()
+        assert custom["to_pay"] == pytest.approx(10 + 12 * 1.3)
 
 
 def test_a_forgotten_bet_can_be_added_late_for_a_week(sent):

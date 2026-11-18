@@ -3,7 +3,7 @@ import { IconCheck, IconDots, IconDownload, IconMinus, IconPlus, IconX } from "@
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth";
-import { costOf, csvUrl, deleteBet, editBet, money, myBets, parseOdds, signedMoney, takeSharedSlip, type BetFilters, type BetStatus, type BetSummary, type TrackedBet, type TrackedLeg } from "../bets";
+import { costOf, csvUrl, deleteBet, editBet, money, myBets, parseOdds, promoBody, promoOf, promoReady, signedMoney, takeSharedSlip, type BetFilters, type BetStatus, type BetSummary, type TrackedBet, type TrackedLeg } from "../bets";
 import { namesItself, KIND_SHORT, americanOdds, pct, signedPct } from "../format";
 import { useLeague } from "../LeagueContext";
 import { leaguePath, goToPath } from "../route";
@@ -11,6 +11,7 @@ import AddBetSheet from "./AddBetSheet";
 import BookBadge from "./BookBadge";
 import BookSelect from "./BookSelect";
 import Menu, { MenuItem } from "./Menu";
+import PromoFields from "./PromoFields";
 import SidePill from "./SidePill";
 import { openSignIn } from "./SignIn";
 import Skeleton from "./Skeleton";
@@ -68,7 +69,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const [stake, setStake] = useState(String(bet.stake));
   const [odds, setOdds] = useState(americanOdds(bet.odds));
   const [tags, setTags] = useState(bet.tags);
-  const [bonus, setBonus] = useState(bet.bonus);
+  const [promo, setPromo] = useState(promoOf(bet));
   const [problem, setProblem] = useState("");
   const done = () => qc.invalidateQueries({ queryKey: ["my-bets"] });
   const save = useMutation({ mutationFn: (p: Parameters<typeof editBet>[1]) => editBet(bet.id, p), onSuccess: () => { setEditing(false); setProblem(""); done(); },
@@ -76,20 +77,23 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const remove = useMutation({ mutationFn: () => deleteBet(bet.id), onSuccess: done, onError: (e: Error) => setProblem(e.message) });
   const oddsN = parseOdds(odds), stakeN = Number(stake.replace(/[$,\s]/g, ""));
   const title = bet.kind === "parlay" ? `${bet.legs.length}-leg parlay` : bet.kind === "custom" ? "Other bet" : "Single";
-  const startEdit = () => { setStake(String(bet.stake)); setOdds(americanOdds(bet.odds)); setTags(bet.tags); setBonus(bet.bonus); setEditing(true); };
+  const startEdit = () => { setStake(String(bet.stake)); setOdds(americanOdds(bet.odds)); setTags(bet.tags); setPromo(promoOf(bet)); setEditing(true); };
+  const canSave = stakeN > 0 && !!oddsN && promoReady(promo, stakeN);
 
   return (
     <article className="card bet-card">
       <header className="bet-head">
         <span className="bet-book"><BookBadge book={bet.book} size={22} /><b>{bet.book}</b><span className="mut">{title} · {bet.league === "oth" ? "Other" : bet.league.toUpperCase()}</span>
           {bet.bonus && <span className="bet-pill" title="Placed with a bonus bet: not counted as money you staked">Bonus bet</span>}
+          {bet.boost && <span className="bet-pill" title={`A ${bet.boost}% profit boost: a win pays ${1 + bet.boost / 100}x the winnings at these odds`}>{bet.boost}% boost</span>}
+          {bet.no_sweat && <span className="bet-pill" title={`A no-sweat bet: if it loses, ${money(bet.no_sweat)} comes back as a bonus bet`}>No sweat</span>}
           {bet.late && <span className="bet-pill" title="Added after its game had started, so the result may have been known">Added late</span>}</span>
         <span className="bet-head-aside">
           <Status bet={bet} />
           <Menu label={<IconDots size={16} stroke={1.75} aria-hidden />} ariaLabel={`Actions for this ${title.toLowerCase()}`} caret={false} buttonClass="icon-btn">
             {(close) => <>
-              <MenuItem onClick={() => { close(); startEdit(); }}>Edit stake, odds and tags</MenuItem>
-              <MenuItem onClick={() => { close(); save.mutate({ bonus: !bet.bonus }); }}>{bet.bonus ? "Not a bonus bet" : "Mark as bonus bet"}</MenuItem>
+              <MenuItem onClick={() => { close(); startEdit(); }}>Edit stake, odds, promo and tags</MenuItem>
+              <MenuItem onClick={() => { close(); save.mutate(bet.bonus ? { bonus: false } : { bonus: true, boost: 0, no_sweat: 0 }); }}>{bet.bonus ? "Not a bonus bet" : "Mark as bonus bet"}</MenuItem>
               {(["won", "lost", "push", "void"] as BetStatus[]).filter((s) => !(bet.settled_by === "user" && bet.status === s)).map((s) => (
                 <MenuItem key={s} onClick={() => { close(); save.mutate({ status: s }); }}>Mark {STATUS_TEXT[s].toLowerCase()}</MenuItem>
               ))}
@@ -104,23 +108,24 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
       )}
       <ul className="bet-legs">{bet.legs.map((l) => <LegRow key={l.id} leg={l} bet={bet} />)}</ul>
       {editing ? (
-        <form className="bet-edit" onSubmit={(e) => { e.preventDefault(); if (stakeN > 0 && oddsN) save.mutate({ stake: stakeN, odds: oddsN, tags, bonus }); }}>
+        <form className="bet-edit" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate({ stake: stakeN, odds: oddsN!, tags, ...promoBody(promo, stakeN) }); }}>
           <div className="bet-edit-row">
             <label className="auth-label">Stake<input className="auth-input" inputMode="decimal" value={stake} onChange={(e) => setStake(e.target.value)} /></label>
             <label className="auth-label">Odds<input className="auth-input" value={odds} onChange={(e) => setOdds(e.target.value)} aria-invalid={!oddsN} /></label>
           </div>
-          <label className="check track-bonus"><input type="checkbox" checked={bonus} onChange={(e) => setBonus(e.target.checked)} /> Bonus bet</label>
+          <PromoFields promo={promo} onChange={setPromo} stake={stakeN > 0 ? stakeN : 0} book={bet.book} compact />
           <label className="auth-label" htmlFor={`tags-${bet.id}`}>Tags</label>
           <TagInput id={`tags-${bet.id}`} tags={tags} onChange={setTags} suggestions={knownTags} />
           <div className="bet-edit-row">
-            <button className="primary" disabled={!(stakeN > 0) || !oddsN || save.isPending}>Save</button>
+            <button className="primary" disabled={!canSave || save.isPending}>Save</button>
             <button type="button" className="link" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </form>
       ) : (
         <p className="bet-foot mut">
-          {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>
+          {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>{bet.boost && <>, boosted {bet.boost}%</>}
           {bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b></> : bet.payout != null && <> → returned <b>{money(bet.payout)}</b></>}
+          {bet.refund > 0 && <>, plus <b>{money(bet.refund)}</b> back as a bonus bet</>}
           {" · "}placed {new Date(bet.placed_at + "Z").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
           {bet.ev_close != null && <> · <span className={bet.ev_close > 0 ? "good" : "bad"}
             title="What this price was worth by the market's closing line, the best early sign of a good bet">{signedPct(bet.ev_close)} vs the close</span></>}
@@ -284,7 +289,8 @@ export default function MyBets() {
         <div className="card admin-card"><span className="mut">Record</span><div className="big">{s.wins}-{s.losses}{s.pushes ? `-${s.pushes}` : ""}</div>
           <span className="mut">won-lost{s.pushes ? "-push" : ""}</span></div>
         <div className="card admin-card"><span className="mut">Profit</span><div className={`big${s.profit < 0 ? " under" : s.profit > 0 ? " over" : ""}`}>{signedMoney(s.profit)}</div>
-          <span className="mut">on {money(s.staked)} settled{s.bonus_staked > 0 && <>, plus {money(s.bonus_staked)} in bonus bets</>}</span></div>
+          <span className="mut">on {money(s.staked)} settled{s.bonus_staked > 0 && <>, plus {money(s.bonus_staked)} in bonus bets</>}
+            {s.refunds > 0 && <span title="Refunded by no-sweat bets that lost. They count once you track them as bonus bets and they win."> · {money(s.refunds)} back as bonus bets</span>}</span></div>
         <div className="card admin-card"><span className="mut">ROI</span><div className={`big${(s.roi ?? 0) < 0 ? " under" : (s.roi ?? 0) > 0 ? " over" : ""}`}>{s.roi == null ? "—" : `${s.roi > 0 ? "+" : ""}${pct(s.roi, 1)}`}</div>
           <span className="mut">profit ÷ staked</span></div>
         {s.clv_n > 0 && (

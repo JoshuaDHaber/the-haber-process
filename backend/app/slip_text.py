@@ -210,11 +210,13 @@ def parse(text: str) -> dict:
     if m:
         teams = [m.group(1).strip(), m.group(2).strip()]
     odds = int(odds_m.group(1)) if odds_m else None
+    from_return = False
     if odds is None and len(legs) == 1:
         odds = legs[0]["odds"]
     elif odds is None and stake and to_return and to_return > stake:
         odds = _american(to_return / stake)   # no price shown (a boosted parlay of priced legs): what it pays says it
+        from_return = True
     boost = re.search(r"(\d+(?:\.\d+)?)\s?%[\s|]*(?:parlay |profit |odds )?boost", text, re.I)
-    return {"boost": float(boost.group(1)) if boost else None,
+    return {"boost": float(boost.group(1)) if boost else None, "odds_from_return": from_return, "no_sweat": False,
             "sportsbook": book, "bet_type": "parlay" if len(legs) > 1 else "single", "odds": odds,
             "stake": stake, "bonus_stake": bonus, "to_return": to_return, "event": {"teams": teams, "starts": None}, "legs": legs}

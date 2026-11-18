@@ -253,7 +253,7 @@ def test_moneyline_legs_match_tonights_games_by_nickname(monkeypatch):
                      for t, n, o in [("LAL", "Los Angeles Lakers", "SAC"), ("SAC", "Sacramento Kings", "LAL"), ("NY", "New York Knicks", "CHI")]],
              "nfl": [dict(player_id="NYG", name="New York Giants", pos="", team="NYG", opp="DAL", game_id="2026_10_DAL_NYG", kickoff=ko, kinds=["ml"])]}
     monkeypatch.setattr(bet_screens, "upcoming_teams", lambda db, league, now: board[league])
-    slip = {"sportsbook": "bet365", "odds": 471, "stake": 15.06, "boost": 15.0, "legs": [
+    slip = {"sportsbook": "bet365", "odds": 471, "stake": 15.06, "boost": 15.0, "odds_from_return": True, "legs": [
         {"player": "LA Lakers", "kind": "ml", "side": "Over", "line": 0.0, "odds": -575, "text": "LA Lakers moneyline -575"},
         {"player": "NY Knicks", "kind": "ml", "side": "Over", "line": 0.0, "odds": -600, "text": "NY Knicks moneyline -600"},
         {"player": "NY Giants", "kind": "ml", "side": "Over", "line": 0.0, "odds": -150, "text": "NY Giants moneyline -150"},
@@ -263,6 +263,18 @@ def test_moneyline_legs_match_tonights_games_by_nickname(monkeypatch):
     assert [(l.graded, l.player and l.player.player_id) for l in d.legs] == [(True, "LAL"), (True, "NY"), (True, "NYG"), (False, None)]
     assert d.legs[0].kind == "ml" and d.legs[0].player.opp == "SAC" and d.legs[3].text == "Toronto Raptors moneyline +120"
     assert any("15% boost" in n for n in d.notes)
+    assert d.boost is None   # the boost is already in odds worked out from the payout
+
+
+def test_a_profit_boost_on_the_slips_own_price_or_a_no_sweat_bet_is_set_on_the_draft():
+    base = {"sportsbook": "DraftKings", "bet_type": "single", "odds": 150, "stake": 20, "bonus_stake": None, "to_return": None, "legs": []}
+    with SessionLocal() as s:
+        boosted = bet_screens.to_draft({**base, "boost": 50, "no_sweat": True}, s, datetime.utcnow())
+        insured = bet_screens.to_draft({**base, "boost": None, "no_sweat": True}, s, datetime.utcnow())
+        free = bet_screens.to_draft({**base, "boost": None, "no_sweat": True, "bonus_stake": 20}, s, datetime.utcnow())
+    assert (boosted.boost, boosted.no_sweat) == (50, False)   # one promo a bet: the boost is what the slip's price leans on
+    assert any("50%" in n for n in boosted.notes)
+    assert (insured.boost, insured.no_sweat) == (None, True) and not free.no_sweat
 
 
 @pytest.mark.parametrize("reader", ["", "-apple"])
