@@ -160,7 +160,11 @@ export interface MoneylineSide {
   team: string; name: string; home: boolean;
   p_model: number; p_mkt: number | null; prob: number; books: number;
   odds: number | null; book: string | null; ev: number | null; kelly: number | null; link: string | null; event_link: string | null;
+  token?: LeadToken | null;
 }
+/** NBA: an early-win token on a moneyline, which pays as a winner once the team goes up by `threshold`. The bet cashes if it
+ *  goes up by that much or wins (p_cash); games/up/up_lost are this season's record: games, how many it went up, how many of those it lost. */
+export interface LeadToken { threshold: number; p_lead: number; p_cash: number; ev: number | null; games: number; up: number; up_lost: number }
 /** A team on a winning streak (Who's hot), with its moneyline: `recent` holds its last `window` point margins, oldest first. */
 export interface HotTeam extends MoneylineSide {
   game_id: string; label: string; gameday: string; gametime: string; opp: string;
@@ -291,7 +295,8 @@ export const api = {
   nbaProjections: () => get<Projection[]>("nba/projections"),
   searchPlayers: (q: string) => get<PlayerHit[]>(lg("player-search"), { q }),
   player: (id: string, marketWeight: number | null) => get<PlayerDetail>(lg(`players/${id}`), { market_weight: marketWeight ?? undefined }),
-  moneylines: (book: string, marketWeight: number | null) => get<MoneylineGame[]>(lg("moneylines"), { book: bookParam(book), market_weight: marketWeight ?? undefined }),
+  moneylines: (book: string, marketWeight: number | null, leadBy?: number) =>
+    get<MoneylineGame[]>(lg("moneylines"), { book: bookParam(book), market_weight: marketWeight ?? undefined, lead_by: leadBy }),
   /** Teams on a winning streak of the league on screen, with their moneyline at `book` (best price anywhere for "all"). */
   hotTeams: (f: Filters, window: number) => get<HotTeam[]>(lg("hot-teams"), { book: bookParam(f.book), game_id: f.game, gameday: f.date, window }),
   /** How a player's market moved through the week (one point per odds fetch). */

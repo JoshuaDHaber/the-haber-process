@@ -20,7 +20,7 @@ from ..engine import moneyline as mlm
 from ..engine import odds as nfl_odds
 from ..odds_keys import KeyRing
 from ..pipeline import _correlation_line, _s, archive_quotes, store_lines
-from . import blowout, espn, grading, model
+from . import blowout, espn, grading, lead, model
 from . import odds as nba_odds
 
 Log = Callable[[str], None]
@@ -82,12 +82,21 @@ def run_projections(log: Log = print, now: Optional[datetime] = None) -> Optiona
         f" (always the home team's usual rate: {backtest['ml']['mae_naive']:.3f})")
     blow_fit = None
     try:   # context for the game pages; the run goes out without it
-        chances, blow_fit = blowout.project(blowout.history(log), slate)
+        hist = blowout.history(log)
+        chances, blow_fit = blowout.project(hist, slate)
         for gid, b in chances.items():
             if gid in teams:
                 teams[gid]["blowout"] = b
         log(f"  blowout chances for {len(chances)} games (t with {blow_fit['nu']:.0f} df over {blow_fit['n']:,} games,"
             f" recent rescale x{blow_fit['mult']:.3f})")
+        try:   # the early-win token's lead chances ride on the blowout fit
+            paths, lead_fit = lead.project(lead.add_leads(hist, log), slate, blow_fit, season)
+            for gid, p in paths.items():
+                if gid in teams:
+                    teams[gid]["lead"] = p
+            log(f"  lead chances for {len(paths)} games ({lead.describe(lead_fit)})")
+        except Exception as e:
+            log(f"  couldn't work out lead chances ({e})")
     except Exception as e:
         log(f"  couldn't work out blowout chances ({e})")
 

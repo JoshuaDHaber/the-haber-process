@@ -22,7 +22,7 @@ from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
 from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, LadderOut,
                        MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
-from . import espn, grading, model
+from . import espn, grading, lead, model
 from . import odds as nba_odds
 
 NbaKind = Literal["pts", "reb", "ast", "threes", "pra", "pr", "pa", "stl", "blk", "dd", "tpl"]
@@ -244,9 +244,12 @@ def grades(request: Request, season: Optional[int] = None, db: Session = Depends
 
 
 @router.get("/moneylines", response_model=list[MoneylineGame])
-def moneylines(book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1), db: Session = Depends(get_db)):
-    """Both teams' win chances for every slate game still to tip off (model, market, blend) and the best moneyline."""
-    return build_moneylines(db, latest_run(db), market_weight, book)
+def moneylines(book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1),
+               lead_by: float = Query(lead.THRESHOLD, ge=1, le=40), db: Session = Depends(get_db)):
+    """Both teams' win chances for every slate game still to tip off (model, market, blend) and the best moneyline, with
+    each side's early-win token (it pays once the team goes up by lead_by)."""
+    run = latest_run(db)
+    return lead.token(build_moneylines(db, run, market_weight, book), run.teams if run and run.teams else {}, lead_by)
 
 
 def build_moneylines(db: Session, run: Optional[NbaRun], market_weight: Optional[float] = None, book: Optional[str] = None) -> list[dict]:
