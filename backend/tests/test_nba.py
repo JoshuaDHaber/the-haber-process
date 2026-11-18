@@ -202,16 +202,21 @@ def test_nba_run_stores_same_game_correlations(monkeypatch):
                             "date": pd.date_range("2025-01-01", periods=800, freq="h").strftime("%Y-%m-%d"),
                             "spread_line": spreads, "margin": np.round(spreads + rng.normal(0, 13, 800))})
     monkeypatch.setattr(nba_pipeline.blowout, "history", lambda log=print: history)
+    monkeypatch.setattr(nba_pipeline.lead, "add_leads", lambda df, log=print: df.assign(
+        home="BOS", away="NY", home_lead=np.maximum(df.margin, 0) + 3, away_lead=np.maximum(-df.margin, 0) + 3))
     log = []
     rid = nba_pipeline.run_projections(log=log.append, now=now)
     with SessionLocal() as s:
         run = s.get(NbaRun, rid)
         corr = run.variance["_correlation"]
         b = run.teams[game["game_id"]]["blowout"]
+        path = run.teams[game["game_id"]]["lead"]
         kept = s.get(NbaRunTables, rid).tables   # the error tables, kept after the run is pruned
     assert kept == {k: v for k, v in run.variance.items() if not k.startswith("_") or k == "_doubles"} and "pts" in kept
     assert b["games"] == 800 and [c["margin"] for c in b["chances"]] == list(blowout.THRESHOLDS)
     assert 0.1 < b["chances"][1]["p"] < 0.3 and b["chances"][1]["p_away"] > b["chances"][1]["p_home"]   # NY favored by 2.5
+    assert path["mu"] < 0 and path["sd"] > 0 and path["season"] == {"BOS": [], "NY": []}   # last season's games don't count
+    assert any(m.strip().startswith("lead chances for 1 games") for m in log)
     pairs = corr["pairs"]
     assert pairs["same|pts:G|threes:G"][0] > 0.5
     assert all(abs(r) < 0.3 for k, (r, n) in pairs.items() if not k.startswith("same|"))
@@ -235,7 +240,8 @@ def nba_client(monkeypatch):
                      variance={}, excluded=["Hurt Guy (Out)"], games=[game],
                      teams={GID: dict(home="DET", away="BOS", gameday="2026-10-20", gametime="19:30", margin=2.0,
                                       p_home=0.56, home_rating=1.0, away_rating=0.5, spread=1.5, total=221.5,
-                                      blowout=dict(games=10000, chances=[dict(margin=20, p=0.18, p_home=0.11, p_away=0.07)]))})
+                                      blowout=dict(games=10000, chances=[dict(margin=20, p=0.18, p_home=0.11, p_away=0.07)]),
+                                      lead=dict(mu=1.5, sd=14.0, c=1.5, hl_k=0.1, hl_m=1.1, hl_c=0.5, games=10000, season={"DET": [[12.0, False], [3.0, True]], "BOS": []}))})
         run.projections = [NbaProjection(player_id="p1", name="Star Guard", pos="PG", team="DET", opp="BOS", home=True,
                                          kind=k, mu=mu, sd=sd, vol=36.0, eff=mu / 36, spread=1.5, status="", game_id=GID,
                                          gameday="2026-10-20", gametime="19:30", last5=[mu] * 5, wx=1.0, teammate_out="")
@@ -274,6 +280,12 @@ def test_nba_picks_moneylines_and_projections(nba_client):
     away, home = ml["sides"]
     assert (away["team"], home["team"]) == ("BOS", "DET") and home["odds"] == -130 and ml["total"] == 221.5
     assert ml["blowout"] == dict(games=10000, chances=[dict(margin=20, p=0.18, p_home=0.11, p_away=0.07)])
+    # the early-win token: DET went up 10 once in two games, and lost it
+    tok = home["token"]
+    assert (tok["threshold"], tok["games"], tok["up"], tok["up_lost"]) == (10, 2, 1, 1) and tok["p_cash"] > home["prob"] > 0
+    assert abs(tok["ev"] - (tok["p_cash"] * (1 + 100 / 130) - 1)) < 1e-9 and away["token"]["p_lead"] < tok["p_lead"]
+    tok15 = nba_client.get("/api/nba/moneylines", params={"lead_by": 15}).json()[0]["sides"][1]["token"]
+    assert tok15["p_lead"] < tok["p_lead"] and (tok15["up"], tok15["up_lost"]) == (0, 0)
     assert len(nba_client.get("/api/nba/projections", params={"kind": "reb"}).json()) == 1
     # the date filter: the game's own day keeps it, another day has nothing
     day = over["gameday"]

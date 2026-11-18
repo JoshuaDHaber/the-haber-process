@@ -379,6 +379,18 @@ class SyncPlan(BaseModel):
     will_recalibrate: bool = False  # True: the model run refits its calibration (slow); False: it reuses the saved one
     calibration: Optional[dict] = None
 
+
+class LeadToken(BaseModel):
+    """An early-win token: the moneyline pays as a winner once the team goes up by `threshold` (nba/lead.py)."""
+    threshold: float
+    p_lead: float                  # the chance it goes up by threshold at some point
+    p_cash: float                  # the chance the bet cashes: goes up by threshold, or wins
+    ev: Optional[float] = None     # at the best price
+    games: int = 0                 # this season: games played (with a largest lead on record)
+    up: int = 0                    # of those, how many it went up by threshold
+    up_lost: int = 0               # and of those, how many it still lost (the ones the token saves)
+
+
 class MoneylineSide(BaseModel):
     team: str
     name: str
@@ -393,6 +405,7 @@ class MoneylineSide(BaseModel):
     kelly: Optional[float] = None
     link: Optional[str] = None
     event_link: Optional[str] = None
+    token: Optional[LeadToken] = None   # NBA: an early-win token on this moneyline (nba/lead.token)
 
 
 class InjuredPlayer(BaseModel):

@@ -181,6 +181,16 @@ def probs(params: dict, spread_line, threshold: float = 20, mult: float = 1.0) -
     return pd.DataFrame({"p_home": home, "p_away": away, "p_blowout": home + away})
 
 
+def rolling_mult(params: dict, df: pd.DataFrame) -> pd.Series:
+    """recent_scale for every game in df (sorted by date, with a spread), from the RECENT_GAMES before its date only."""
+    z2 = ((df.margin - df.spread_line - params["bias"]) / scale(params, df.spread_line)) ** 2
+    # the mean over the n games before each date (same-day games can't see each other's results)
+    roll = z2.rolling(RECENT_GAMES, min_periods=RECENT_GAMES).mean().shift(1)
+    roll = roll.where(df.groupby("date").cumcount() == 0).ffill()
+    nu = params["nu"]
+    return np.sqrt(roll / (nu / (nu - 2))).clip(*SCALE_BOUNDS).fillna(1.0)
+
+
 def walk_forward(df: pd.DataFrame, first_test: int, thresholds=THRESHOLDS) -> pd.DataFrame:
     """Each season from first_test on, predicted from a fit on the seasons before it, rescaled game by game by the
     RECENT_GAMES before that game's date. Columns: season, date, spread_line, margin, p<t> for each threshold."""
@@ -188,12 +198,7 @@ def walk_forward(df: pd.DataFrame, first_test: int, thresholds=THRESHOLDS) -> pd
     out = []
     for season in sorted(s for s in df.season.unique() if s >= first_test):
         params = fit(df[df.season < season])
-        z2 = ((df.margin - df.spread_line - params["bias"]) / scale(params, df.spread_line)) ** 2
-        # the mean over the n games before each date (same-day games can't see each other's results)
-        roll = z2.rolling(RECENT_GAMES, min_periods=RECENT_GAMES).mean().shift(1)
-        roll = roll.where(df.groupby("date").cumcount() == 0).ffill()
-        nu = params["nu"]
-        mult = np.sqrt(roll / (nu / (nu - 2))).clip(*SCALE_BOUNDS).fillna(1.0)
+        mult = rolling_mult(params, df)
         te = df[df.season == season]
         o = te[["season", "date", "spread_line", "margin"]].copy()
         for t in thresholds:
