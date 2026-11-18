@@ -40,3 +40,26 @@ def test_odds_range_hides_prices_outside_the_window_per_side():
     assert len(build_ladder(60, 25, q)) == 3  # 0 = no limit
     edge = pd.DataFrame([dict(line=50.5, book="A", alt=True, over_odds=-300, under_odds=300, over_link=None, under_link=None, event_link=None)])
     assert build_ladder(60, 25, edge, max_abs_odds=300)[0]["over"] and build_ladder(60, 25, edge, max_abs_odds=300)[0]["under"]  # inclusive
+
+
+def test_calibrated_mu_moves_the_projection_so_the_main_line_matches_the_curve():
+    from app.engine import market as mkt
+    from app.engine.ladder import calibrated_mu
+    from app.engine.model import Z_PROBS, prob_over_under_dist
+    from scipy.stats import norm
+    dist = dict(mu=[5.0, 40.0], sd=[5.0, 5.0], z=[float(norm.ppf(p)) for p in Z_PROBS])   # normal errors, sd 5
+    curve = dict(a=0.0, b=0.3)                                  # the model is far surer than it should be
+    assert calibrated_mu(30.0, 6.0, 24.5, "pa", dist, None) == 30.0      # no curve, no main line, yes/no: unchanged
+    assert calibrated_mu(30.0, 6.0, None, "pa", dist, curve) == 30.0
+    assert calibrated_mu(0.4, 0.0, 0.5, "dd", dist, curve) == 0.4
+    raw = prob_over_under_dist(30.0, 24.5, dist)
+    mu = calibrated_mu(30.0, 6.0, 24.5, "pa", dist, curve)
+    assert 24.5 < mu < 30.0
+    # the main line now reads what the Best props board shows ...
+    assert prob_over_under_dist(mu, 24.5, dist)[0] == pytest.approx(mkt.calibrate(*raw, curve)[0], abs=1e-3)
+    # ... and the rungs still fall off with the line, instead of all reading the curve's near-coin-flip
+    rungs = [prob_over_under_dist(mu, line, dist)[0] for line in (14.5, 24.5, 34.5)]
+    assert rungs[0] > 0.9 and rungs[0] > rungs[1] > rungs[2] and rungs[2] < 0.15
+    # Poisson counts (threes, steals, blocks) too
+    pois = calibrated_mu(3.0, 0.0, 1.5, "threes", {"poisson": True}, curve)
+    assert 1.5 < pois < 3.0

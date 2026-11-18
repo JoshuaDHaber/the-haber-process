@@ -3,6 +3,7 @@ distribution read off the ladder itself (market.fit_market_curve)."""
 import pandas as pd
 
 from . import market as mkt
+from .market import calibrated_mu  # noqa: F401  (the ladder routes price from it)
 from . import odds
 from .model import prob_over_under, prob_over_under_dist
 from .picks import HOLD

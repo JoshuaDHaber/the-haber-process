@@ -83,8 +83,9 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
     book_weights (market.fit_book_weights; market.BOOK_PRIOR without) and moved to that line along the model's slope.
     market_weight=None uses the fitted weight for each market and for how long before kickoff the price was fetched
     (`fitted`, market.fit_market_weights); the market floors (MIN_MARKET_WEIGHT) apply either way. A market with a
-    calibration curve in `fitted` (market.fit_calibration) has the model's chance put through it before the blend, with
-    either weight; p_raw keeps the model's chance before it (what the pick logs store, so the curve refits on raw)."""
+    calibration curve in `fitted` (market.fit_calibration) prices the model's side from the projection that puts the
+    consensus line on the curve (market.calibrated_mu), with either weight; p_raw keeps the model's chance before it
+    (what the pick logs store, so the curve refits on raw)."""
     if proj.empty or lines.empty:
         return pd.DataFrame(columns=PICK_COLUMNS)
     lines = lines.copy()
@@ -112,6 +113,17 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
             chances[k] = (prob_over_under_dist(p.mu, line, dists[market]) if dists and market in dists
                           else prob_over_under(p.mu, line, p.sd ** 2))
         return chances[k]
+
+    cal_mus = {}   # (player, market) -> the projection its lines are priced from with a calibration curve
+
+    def calibrated_chance(p, market, line, cline, curve):
+        """(p_over, p_under) at this line from the projection that puts the consensus line on the curve
+        (market.calibrated_mu): a book's line off the consensus moves along the model's slope, as the market's does."""
+        k = (p.key, market)
+        if k not in cal_mus:
+            cal_mus[k] = mkt.calibrated_mu(p.mu, p.sd, cline, market, dists.get(market) if dists else None, curve)
+        m = cal_mus[k]
+        return prob_over_under_dist(m, line, dists[market]) if dists and market in dists else prob_over_under(m, line, p.sd ** 2)
 
     medians = {}
 
@@ -148,14 +160,13 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
         else:
             po, pu = chance(p, r.market, r.line)
         raw = {"Over": po, "Under": pu}
-        po_cal, pu_cal = mkt.calibrate(po, pu, mkt.curve_for(fitted, r.market))
+        curve = None if is_td else mkt.curve_for(fitted, r.market)   # (yes/no markets have no curve: model.fit_doubles)
+        po_cal, pu_cal = calibrated_chance(p, r.market, r.line, c.line, curve) if curve else (po, pu)
         mk_over = c.nv_o
         if not is_td and pd.notna(mk_over) and abs(c.line - r.line) > 1e-9:
             # shift the consensus probability to this book's line using the model's own slope
             po_c = chance(p, r.market, c.line)[0]
             mk_over = float(np.clip(c.nv_o + (po - po_c), 0.02, 0.98))
-        # the consensus moved along the raw model's slope above: the curve flattens the model's view of this player,
-        # not how a chance changes from one line to the next
         for side, odd, p_side, mk in (("Over", r.over_odds, po_cal, mk_over), ("Under", r.under_odds, pu_cal, 1 - mk_over)):
             if pd.isna(odd):
                 continue

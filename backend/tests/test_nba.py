@@ -405,3 +405,34 @@ def test_nba_player_search_covers_the_slate_and_rosters(nba_client, monkeypatch)
     assert [(h["name"], h["projected"]) for h in hits] == [("Star Guard", True), ("Starling Wing", False)]
     assert hits[1]["headshot"].endswith("/r2.png") and hits[1]["team"] == "LAL"
     assert nba_client.get("/api/nba/player-search", params={"q": "big"}).json()[0]["headshot"] == "http://x/r3.png"
+
+
+def _main_rung(client):
+    return next(q for q in client.get("/api/nba/players/p1/lines", params={"kind": "pts"}).json()["quotes"] if not q["alt"])
+
+
+def test_nba_ladder_prices_from_the_calibrated_projection(nba_client):
+    """The ladder's main-line rung reads what the Best props board shows once a market has a calibration curve."""
+    from app import market_fit
+    from app.db import Setting
+    with SessionLocal() as s:
+        s.merge(Setting(key="market_fit_nba", value=dict(fitted_at="2026-11-18T00:00:00", market_weights=dict(
+            w=0.0, kinds={}, calibration={"pts": dict(a=0.0, b=0.3)}))))
+        s.commit()
+    market_fit.clear_cache()
+    try:
+        board = next(p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
+                     if p["side"] == "Over")
+        rung = _main_rung(nba_client)
+        assert rung["over"]["p_model"] == pytest.approx(board["p_model"], abs=2e-3)
+        with SessionLocal() as s:
+            s.query(Setting).filter_by(key="market_fit_nba").delete()
+            s.commit()
+        market_fit.clear_cache()
+        raw = _main_rung(nba_client)
+        assert raw["over"]["p_model"] > rung["over"]["p_model"] + 0.03     # the curve really moved it
+    finally:
+        with SessionLocal() as s:
+            s.query(Setting).filter_by(key="market_fit_nba").delete()
+            s.commit()
+        market_fit.clear_cache()

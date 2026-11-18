@@ -16,9 +16,10 @@ from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
+from scipy.optimize import brentq, minimize
 
 from . import odds
+from .model import prob_over_under, prob_over_under_dist
 from .td import YES_NO
 
 # before there's history to fit them: books that post their own numbers count for more, the slowest offshore ones less
@@ -355,9 +356,12 @@ def weight_for(table: Optional[dict], kind: str, hours: Optional[float], default
 # is too sure of itself or that leans one way. In the first month of NBA grading the combo markets (PA, PRA, PR) had
 # almost no signal past the line: whether the model said 26% or 60%, overs went 47-49%. Points were too sure too
 # (21% said, 30% hit). A logistic curve on the logit of the model's chance, per market, fixes both before the blend:
-# fitted on graded picks from Oct 20 to Nov 3 and tested on Nov 4 to 18, it beat the raw model's log loss in every
-# main market and turned the main-prop board from -0.5% to +2.1% ROI at the same size. The market weight stays fitted on
-# the raw chance (the weights refitted on the curve leaned on a market bias that didn't hold, and doubled the board).
+# the curve goes through the consensus line and every other line is priced from the projection that puts it there
+# (calibrated_mu). Fitted on graded picks before Nov 1, 4 and 8 and tested after each, the blend's log loss beat both
+# today's and the curve put on each book's own line, and the main-prop board (EV 3-20%) went from -1.0%..+0.8% ROI to
+# +1.2%..+2.9%, on a board about 40% smaller: a book's shifted line no longer gets the consensus line's chance. The
+# market weight stays fitted on the raw chance (the weights refitted on the curve leaned on a market bias that didn't
+# hold, and doubled the board).
 # Double- and triple-doubles keep their own curve (model.fit_doubles): another one on top made them worse.
 CAL_PRIOR_N = 150        # graded picks a market needs before its own curve outweighs no change (a = 0, b = 1)
 CAL_MIN_N = 100          # fewer graded picks than this and the market isn't recalibrated at all
@@ -403,3 +407,26 @@ def calibrate(p_over: float, p_under: float, curve: Optional[dict]) -> tuple[flo
 def curve_for(table: Optional[dict], kind: str) -> Optional[dict]:
     """A market's calibration curve from the fitted market weights (fit_market_weights' table), if it has one."""
     return ((table or {}).get("calibration") or {}).get(kind)
+
+
+def calibrated_mu(mu: float, sd: float, line: Optional[float], kind: str, dist: Optional[dict], curve: Optional[dict]) -> float:
+    """The projection every line of a market is priced from once it has a calibration curve (fit_calibration): the one
+    whose raw chance of going over `line` (the consensus line) is the curve's chance at the real projection. The Best
+    props board (picks.build_picks) and the ladder (ladder.build_ladder) both price from it.
+
+    The curve corrects how sure the model is about this player, not how a chance changes from one line to the next, so
+    it can't go on each line: with PA's near-flat curve every ladder rung would read about 50%, ten points below the
+    projection too, and a book posting a line two points under the consensus would get the same chance as the
+    consensus. Moving the projection keeps the consensus line on the curve and lets other lines fall off along the
+    model's own error table. Unchanged without a curve or a line, and for yes/no."""
+    if not curve or line is None or pd.isna(line) or kind in YES_NO:
+        return mu
+    chance = (lambda m: prob_over_under_dist(m, line, dist)[0]) if dist else (lambda m: prob_over_under(m, line, sd * sd)[0])
+    target = calibrate(chance(mu), 1 - chance(mu), curve)[0]
+    lo, hi = 1e-3, max(3.0 * mu, 3.0 * float(line) + 5.0)
+    # the raw chances are held to 1-99%: a target outside what the range can reach stays at its nearest end
+    if target <= chance(lo):
+        return lo
+    if target >= chance(hi):
+        return hi
+    return float(brentq(lambda m: chance(m) - target, lo, hi, xtol=1e-4))

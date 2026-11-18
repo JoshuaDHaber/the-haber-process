@@ -164,3 +164,15 @@ def test_an_edge_over_max_ev_is_flagged_only_when_asked():
     capped = build_picks(p, ln, 0.0, max_ev=0.2).query("side == 'Over'").iloc[0]
     assert capped.flagged and capped.flag == "edge too big"
     assert not build_picks(p, ln, 0.0, max_ev=0.2).query("side == 'Under'").iloc[0].flagged
+
+
+def test_a_line_off_the_consensus_is_priced_along_the_model_slope_not_flattened_by_the_curve():
+    p = proj(mu=90)
+    ln = lines([("Test Back", "rush", 60.5, -110, -110, "A"), ("Test Back", "rush", 60.5, -110, -110, "B"),
+                ("Test Back", "rush", 50.5, -200, 160, "Low")])
+    fitted = {"w": 0.0, "kinds": {}, "calibration": {"rush": dict(a=0.0, b=0.05)}}   # all but no signal past the line
+    priced = build_picks(p, ln, None, fitted=fitted, best_only=False).query("side == 'Over'")
+    at_cons = priced[priced.line == 60.5].iloc[0]
+    low = priced[priced.line == 50.5].iloc[0]
+    assert at_cons.p_model == pytest.approx(0.5, abs=0.03)        # the consensus line sits on the curve
+    assert low.p_model > at_cons.p_model + 0.1                    # 10 yards lower is still far likelier

@@ -16,8 +16,8 @@ from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, c
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import odds
-from ..engine.ladder import build_ladder, ladder_curve
-from ..engine.market import weight_for
+from ..engine.ladder import build_ladder, calibrated_mu, ladder_curve
+from ..engine.market import curve_for, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
 from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, LadderOut,
@@ -391,12 +391,15 @@ def player_lines(player_id: str, kind: NbaKind, odds_range: int = Query(300, ge=
     dist = _dists(run).get(kind)
     curve = ladder_curve(quotes, p.mu, kind, dist, market_fit.book_weights(db, "nba"))
     w = market_fit.ladder_weight(market_weight, market_fit.market_weights(db, "nba"), p, main)
+    # the market's calibration curve, through the projection at the main line (the board's), not on each rung
+    mu = calibrated_mu(p.mu, p.sd, main.line.median() if not main.empty else None, kind, dist,
+                       curve_for(market_fit.market_weights(db, "nba"), kind))
     if books.hide_offshore(db):
         quotes = quotes[~quotes.book.isin(books.OFFSHORE)]
     fetched = max((r.fetched_at for r in alts), default=None)
     return LadderOut(kind=kind, mu=p.mu, sd=p.sd, game_id=p.game_id, alt_fetched_at=fetched.isoformat() if fetched else None,
                      curve=curve, w=w if curve else None,
-                     quotes=build_ladder(p.mu, p.sd, quotes, odds_range, kind, dist, curve, w))
+                     quotes=build_ladder(mu, p.sd, quotes, odds_range, kind, dist, curve, w))
 
 
 def _proj(db: Session, run: Optional[NbaRun], player_id: str, kind: str) -> NbaProjection:
