@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from . import auth, config, slip_text
-from .bets import ML, NBA_KINDS, require_member, upcoming_players, upcoming_teams
+from .bets import ML, NBA_KINDS, recent_players, recent_teams, require_member, upcoming_players, upcoming_teams
 from .db import User
 from .engine import odds
 from .schemas import BetPlayer
@@ -154,9 +154,16 @@ def _norm(name: str) -> str:
     return odds.norm(re.sub(r"\s+(jr|sr|ii|iii|iv)\.?$", "", name.strip(), flags=re.I))
 
 
+def _nearest(p: dict, now: datetime) -> tuple:
+    """Sort key for a player's (or team's) games: still to start first, soonest first; then started ones, latest first."""
+    gap = (datetime.fromisoformat(p["kickoff"]) - now).total_seconds()
+    return (gap <= 0, abs(gap))
+
+
 def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
-    """Match each leg to a player with a game still to start (preferring the game whose teams the slip shows) and a market
-    he's projected in. Anything else stays a leg in words, which the bettor marks when it settles."""
+    """Match each leg to a player on the board (preferring the game whose teams the slip shows, then one still to start,
+    then the most recent) and a market he's projected in: games from the last bets.LATE_DAYS days count too, for a bet
+    the bettor forgot to record. Anything else stays a leg in words, which the bettor marks when it settles."""
     legs, notes, league_votes = [], [], []
     pools = {}
     teams = {t.lower() for t in slip.get("event", {}).get("teams") or []}
@@ -168,16 +175,17 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
             # a team's moneyline: by its nickname, which every book shows ("LA Lakers", "Los Angeles Lakers"), in either league
             nick = _norm(name).split()[-1:] or [""]
             for lg in ("nba", "nfl"):
-                found = [t for t in pools.setdefault(f"ml-{lg}", upcoming_teams(db, lg, now)) if _norm(t["name"]).split()[-1:] == nick]
+                pool = pools.setdefault(f"ml-{lg}", upcoming_teams(db, lg, now) + recent_teams(db, lg, now))
+                found = [t for t in pool if _norm(t["name"]).split()[-1:] == nick]
                 if found:
-                    match, league = min(found, key=lambda t: t["kickoff"]), lg
+                    match, league = min(found, key=lambda t: _nearest(t, now)), lg
                     break
             raw = {**raw, "line": 0.0, "side": "Over"}
         elif league and name:
-            pool = pools.setdefault(league, upcoming_players(db, league, now))
+            pool = pools.setdefault(league, upcoming_players(db, league, now) + recent_players(db, league, now))
             found = [p for p in pool if _norm(p["name"]) == _norm(name) and kind in p["kinds"]]
-            # a player with two games ahead: the one whose teams the slip names, else the next one
-            found.sort(key=lambda p: (not any(t in team for team in teams for t in (p["team"].lower(), p["opp"].lower())), p["kickoff"]))
+            # a player with several games: the one whose teams the slip names, else the next one, else the latest played
+            found.sort(key=lambda p: (not any(t in team for team in teams for t in (p["team"].lower(), p["opp"].lower())), *_nearest(p, now)))
             match = found[0] if found else None
         line = raw.get("line")
         if match and line is not None:
@@ -186,6 +194,8 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
                                   odds=raw.get("odds"), text=raw.get("text") or ""))
         else:
             legs.append(ScreenLeg(graded=False, kind="custom", side="", line=0.0, odds=raw.get("odds"), text=raw.get("text") or name or "Leg"))
+    if any(leg.graded and leg.player.started for leg in legs):
+        notes.append("This game has started, so the bet is saved as added late: My bets marks it, since the result may have been known.")
     by_hand = [leg for leg in legs if not leg.graded]
     if by_hand:
         n = len(by_hand)

@@ -129,12 +129,15 @@ def test_the_fanduel_slip_keeps_a_market_the_site_doesnt_project_for_marking_by_
     assert any("settle the bet yourself" in n for n in d.notes) and any("stake" in n for n in d.notes)
 
 
-def test_a_player_not_on_the_board_or_already_started_isnt_matched():
+def test_a_started_game_matches_as_late_for_a_week_and_a_player_not_on_the_board_never():
     with SessionLocal() as s:
-        later = bet_screens.to_draft(BET365, s, KICKOFF + timedelta(hours=1))   # after kickoff: nothing to match
+        later = bet_screens.to_draft(BET365, s, KICKOFF + timedelta(hours=1))   # forgot to record it: still matched, late
+        too_late = bet_screens.to_draft(BET365, s, KICKOFF + timedelta(days=bets.LATE_DAYS, hours=1))
         nobody = bet_screens.to_draft({"legs": [{"player": "Nobody Atall", "kind": "rec", "side": "Over", "line": 9.5,
                                                   "odds": None, "text": "Nobody 10+"}]}, s, datetime.utcnow())
-    assert not any(leg.graded for leg in later.legs) and not nobody.legs[0].graded
+    graded = [leg for leg in later.legs if leg.graded]
+    assert graded and all(leg.player.started for leg in graded) and any("added late" in n for n in later.notes)
+    assert not any(leg.graded for leg in too_late.legs) and not nobody.legs[0].graded
 
 
 # ---------- the endpoint ----------

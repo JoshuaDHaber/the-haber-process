@@ -3,7 +3,7 @@ import { IconPhoto, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
-import { addCustomBet, addPropBet, COMMON_BOOKS, findBetPlayers, money, myBets, parseOdds, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
+import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, money, myBets, parseOdds, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
   winReturn, type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
 import { isYesNo, KIND_LABEL, namesItself, americanOdds, playLabel } from "../format";
 import { toAmerican, toDecimal, toWin } from "../slip";
@@ -29,7 +29,8 @@ const legsPrice = (legs: ManualLeg[]) =>
   legs.every((l) => l.odds != null) ? toAmerican(legs.reduce((d, l) => d * toDecimal(l.odds!), 1)) : null;
 const when = (iso: string) => new Date(iso + "Z").toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-/** My bets → "Add a bet": record a bet placed outside the app, before its game starts (the rule every tracked bet follows).
+/** My bets → "Add a bet": record a bet placed outside the app. Before its game starts is the rule; one the bettor forgot can
+ *  still be added up to LATE_DAYS after, and is marked late on My bets (the result may have been known).
  *  A player prop picked from a search is graded from the box scores like a tracked one; anything else (a spread, a total,
  *  another sport, a boost) is described in words and marked by hand. */
 export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { onClose: () => void; defaultLeague: "nfl" | "nba"; sharedSlip?: File | string }) {
@@ -93,7 +94,10 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const propOdds = allLegs.length === 1 ? allLegs[0].odds : parlayN;
   const otherOdds = parseOdds(odds);
   const startsAt = new Date(`${date}T${time || "00:00"}`);
-  const ready = stakeOk && book.trim() !== "" && (mode === "prop" ? allLegs.length > 0 && !!propOdds : description.trim().length >= 3 && !!otherOdds && startsAt.getTime() > Date.now());
+  const tooOld = startsAt.getTime() < Date.now() - LATE_DAYS * 86_400_000;
+  // started already: it's still added, marked late (the server decides; this only says so)
+  const late = mode === "prop" ? allLegs.some((l) => !l.custom && l.player.started) : startsAt.getTime() <= Date.now();
+  const ready = stakeOk && book.trim() !== "" && (mode === "prop" ? allLegs.length > 0 && !!propOdds : description.trim().length >= 3 && !!otherOdds && !tooOld);
   const payOdds = mode === "prop" ? propOdds : otherOdds;
   const pays = stakeOk && payOdds ? winReturn(stakeN, toWin(payOdds, stakeN), bonus) : null;
 
@@ -164,7 +168,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   return (
     <Sheet label="Add a bet" overlayClass="track-overlay" onClose={onClose}>
       <h2>Add a bet</h2>
-      <p className="sub auth-lede">Record a bet you placed somewhere else, before its game starts, so everything's in one place.</p>
+      <p className="sub auth-lede">Record a bet you placed somewhere else, so everything's in one place. Forgot one? Bets from the last {LATE_DAYS} days can still go in.</p>
       {known.data && (
         <div className="add-upload">
           <button type="button" className="primary outline" disabled={reading} onClick={() => file.current?.click()}>
@@ -211,21 +215,23 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
           )}
           {!player ? <>
             <label className="auth-label" htmlFor="add-player">{legs.length ? "Add another leg" : "Player"}</label>
-            <input id="add-player" className="auth-input" value={q} placeholder="Search players with a game still to start" autoComplete="off"
+            <input id="add-player" className="auth-input" value={q} placeholder="Search players by name" autoComplete="off"
               onChange={(e) => setQ(e.target.value)} />
             {query.length >= 2 && (
               <div className="add-results" role="list">
-                {found.isLoading ? <p className="mut">Searching…</p> : !found.data?.length ? <p className="mut">No player with a game still to start matches “{query}”.</p> :
+                {found.isLoading ? <p className="mut">Searching…</p> : !found.data?.length ? <p className="mut">No player with a game in the last {LATE_DAYS} days or still to come matches “{query}”.</p> :
                   found.data.map((p) => (
                     <button type="button" role="listitem" key={`${p.player_id}-${p.game_id}`} className="menu-item" onClick={() => pickPlayer(p)}>
-                      <span><b>{p.name}</b> <span className="mut">{p.pos} · {p.team} vs {p.opp} · {when(p.kickoff)}</span></span>
+                      <span><b>{p.name}</b> <span className="mut">{p.pos} · {p.team} vs {p.opp} · {when(p.kickoff)}</span>
+                        {p.started && <span className="bet-pill">Started</span>}</span>
                     </button>
                   ))}
               </div>
             )}
           </> : <>
             <div className="add-player">
-              <span><b>{player.name}</b> <span className="mut">{player.team} vs {player.opp} · {when(player.kickoff)}</span></span>
+              <span><b>{player.name}</b> <span className="mut">{player.team} vs {player.opp} · {when(player.kickoff)}</span>
+                {player.started && <span className="bet-pill">Started</span>}</span>
               <button type="button" className="link" onClick={() => setPlayer(null)}>Change</button>
             </div>
             <div className="track-fields">
@@ -261,7 +267,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
             <label className="auth-label">&nbsp;<input className="auth-input" type="time" value={time} aria-label="Start time" onChange={(e) => setTime(e.target.value)} /></label>
             <label className="auth-label">Odds<input className="auth-input" value={odds} placeholder="e.g. -110" onChange={(e) => setOdds(e.target.value)} aria-invalid={odds !== "" && !otherOdds} /></label>
           </div>
-          {startsAt.getTime() <= Date.now() && <p className="err">That's already started: bets are added before their event starts.</p>}
+          {tooOld && <p className="err">That started more than {LATE_DAYS} days ago, too long ago to add.</p>}
         </>}
 
         <div className="track-fields">
@@ -277,6 +283,8 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
         </label>
         <label className="auth-label" htmlFor="add-tags">Tags <span className="mut">(optional)</span></label>
         <TagInput id="add-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
+        {late && !tooOld && <p className="warn add-late">{mode === "prop" ? "This game has started" : "This has started"}, so it's added
+          as <b>late</b>: My bets marks it, since you may have known how it went. It's graded like any other bet.</p>}
         <p className="mut track-pays">{pays != null ? <>Pays <b>{money(pays)}</b> if it wins</> : "Fill in the bet, sportsbook, odds and stake"}</p>
         {problem && <p className="err auth-problem" role="alert">{problem}</p>}
         <button className="primary" disabled={!ready || busy}>{busy ? "Saving…" : mode === "prop" && allLegs.length > 1 ? `Add ${allLegs.length}-leg parlay` : "Add bet"}</button>

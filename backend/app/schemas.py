@@ -690,7 +690,8 @@ class BetIn(BaseModel):
 
 
 class BetPlayer(BaseModel):
-    """A player with a game still to start, for adding a prop placed elsewhere (app/bets.py bet_players)."""
+    """A player with a game still to start, or one that started in the last bets.LATE_DAYS days, for adding a prop placed
+    elsewhere (app/bets.py bet_players)."""
     player_id: str
     name: str
     pos: str
@@ -699,6 +700,7 @@ class BetPlayer(BaseModel):
     game_id: str
     kickoff: str                     # UTC
     kinds: list[str]                 # the markets he's projected in
+    started: bool = False            # the game has started: a bet on it is added late
 
 
 class BetPatch(BaseModel):
@@ -749,6 +751,7 @@ class BetOut(BaseModel):
     tags: list[str] = []
     description: Optional[str] = None
     bonus: bool = False              # a bonus bet: profit = payout, and it adds nothing to what was staked
+    late: bool = False               # added after its first game started
     placed_at: str
     settled_at: Optional[str] = None
     started: bool                    # its first game has kicked off

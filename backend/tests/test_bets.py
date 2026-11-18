@@ -133,7 +133,6 @@ def test_track_and_list(sent):
 def test_track_refuses_bad_bets(sent):
     with member(sent, "strict@example.com", "198.51.100.2") as c:
         post = lambda **body: c.post("/api/me/bets", json={"book": "FanDuel", "kind": "single", "stake": 10, **body})
-        assert "started" in post(legs=[leg(game=NFL_OLD)]).json()["detail"]                # no backfilling after kickoff
         assert post(legs=[leg(pid="nobody")]).status_code == 422                           # not on the board
         assert post(legs=[leg(), leg("00-W1")]).status_code == 422                         # a single with two legs
         assert post(kind="parlay", odds=200, legs=[leg(), leg(game=NBA_GAME, pid="9001", kind="pts")]).status_code == 422  # two leagues
@@ -161,6 +160,62 @@ def test_bonus_bets_count_profit_but_not_stake(sent):
         lost = c.patch(f"/api/me/bets/{free['id']}", json={"bonus": True, "status": "lost"}).json()
         assert (lost["payout"], lost["profit"]) == (0.0, 0.0)
         assert "bonus_bet" in c.get("/api/me/bets.csv").text.splitlines()[0]
+
+
+def test_a_forgotten_bet_can_be_added_late_for_a_week(sent):
+    """A game that started (NFL_OLD, 3 days ago): the bet is added, marked late, and grading treats it like any other.
+    Older than LATE_DAYS, it's refused."""
+    with member(sent, "forgot@example.com", "198.51.100.41") as c:
+        r = c.post("/api/me/bets", json={"book": "DraftKings", "kind": "single", "stake": 10, "legs": [leg(game=NFL_OLD)]})
+        assert r.status_code == 200, r.text
+        b = r.json()
+        assert b["late"] and b["started"] and b["legs"][0]["name"] == "Rusher One" and b["legs"][0]["gameday"] == PAST
+        on_time = c.post("/api/me/bets", json={"book": "DraftKings", "kind": "single", "stake": 10, "legs": [leg()]}).json()
+        assert not on_time["late"]
+        assert "added_late" in c.get("/api/me/bets.csv").text.splitlines()[0]
+        # the player search offers the started game too, flagged, after the ones still to start
+        hits = c.get("/api/me/bet-players", params={"league": "nfl", "q": "Rusher"}).json()
+        assert {(h["game_id"], h["started"]) for h in hits} >= {(NFL_GAME, False), (NFL_OLD, True)}
+        # an other bet whose event started yesterday is late too; one from last month is refused
+        past = (datetime.utcnow() - timedelta(days=1)).isoformat() + "Z"
+        other = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "custom", "description": "Chiefs -3.5", "starts_at": past,
+                                             "odds": -110, "stake": 5}).json()
+        assert other["late"]
+        old = (datetime.utcnow() - timedelta(days=bets.LATE_DAYS + 1)).isoformat() + "Z"
+        assert "too long ago" in c.post("/api/me/bets", json={"book": "FanDuel", "kind": "custom", "description": "Chiefs -3.5",
+                                                              "starts_at": old, "odds": -110, "stake": 5}).json()["detail"]
+
+
+def test_a_game_off_the_latest_board_is_found_on_the_last_run_that_had_it(sent):
+    """Last night's game has gone from the latest NBA run: the run before, which had it, gives its players and tip-off."""
+    yday = (datetime.utcnow() - timedelta(hours=20)).replace(microsecond=0)
+    old_game = f"2099_{yday:%Y%m%d}_CHA_LAL"
+    with SessionLocal() as s:
+        older = NbaRun(season=2100, slate=[yday.date().isoformat()], backtest={}, variance={},
+                       games=[{"game_id": old_game, "start": yday.isoformat() + "Z"}])
+        s.add(older)
+        s.flush()
+        s.add(NbaProjection(run_id=older.id, player_id="7001", name="Luka Test", pos="G", team="LAL", opp="CHA", home=True, kind="pts",
+                            mu=33, sd=8, vol=30, eff=1.1, spread=0, game_id=old_game, gameday=yday.date().isoformat(), gametime="23:00", last5=[]))
+        newer = NbaRun(season=2100, slate=[SOON], backtest={}, variance={}, games=[{"game_id": NBA_GAME, "start": f"{SOON}T23:30:00Z"}])
+        s.add(newer)
+        s.flush()
+        s.add(NbaProjection(run_id=newer.id, player_id="9001", name="Guard One", pos="G", team="BOS", opp="NYK", home=False, kind="pts",
+                            mu=25, sd=6, vol=34, eff=0.7, spread=0, game_id=NBA_GAME, gameday=SOON, gametime="19:30", last5=[]))
+        s.commit()
+        ids = older.id, newer.id
+    try:
+        with member(sent, "lastnight@example.com", "198.51.100.42") as c:
+            hit = c.get("/api/me/bet-players", params={"league": "nba", "q": "Luka Test"}).json()
+            assert [(h["game_id"], h["started"], h["kinds"]) for h in hit] == [(old_game, True, ["pts"])]
+            b = c.post("/api/me/bets", json={"book": "DraftKings", "kind": "single", "stake": 4.86,
+                                             "legs": [leg(game=old_game, pid="7001", kind="pts", line=34.5, odds=-120)]}).json()
+            assert b["late"] and b["league"] == "nba" and b["legs"][0]["team"] == "LAL" and b["legs"][0]["kickoff"].startswith(yday.isoformat()[:16])
+    finally:
+        with SessionLocal() as s:
+            for rid in ids:
+                s.delete(s.get(NbaRun, rid))
+            s.commit()
 
 
 def test_bets_need_a_confirmed_account(sent):
@@ -342,8 +397,9 @@ def test_finding_a_player_to_add_a_prop_placed_elsewhere(sent):
     with member(sent, "elsewhere@example.com", "198.51.100.11") as c:
         hits = c.get("/api/me/bet-players?league=nfl&q=wideout").json()
         assert [(h["name"], h["game_id"], h["kinds"]) for h in hits] == [("Wideout One", NFL_GAME, ["rush"])]
-        # the started game's rows (NFL_OLD) never show: a bet is only tracked before kickoff
-        assert [h["game_id"] for h in c.get("/api/me/bet-players?league=nfl&q=rusher").json()] == [NFL_GAME]
+        # the started game (NFL_OLD, 3 days ago) shows too, flagged: a bet the bettor forgot can be added late
+        assert sorted((h["game_id"], h["started"]) for h in c.get("/api/me/bet-players?league=nfl&q=rusher").json()) == [
+            (NFL_OLD, True), (NFL_GAME, False)]
         assert c.get("/api/me/bet-players?league=nba&q=guard").json()[0]["player_id"] == "9001"
         assert c.get("/api/me/bet-players?league=nfl&q=").json() == []
     with TestClient(main.app, client=("198.51.100.12", 5000)) as anon:
@@ -360,9 +416,9 @@ def test_custom_bets_are_tracked_before_they_start_and_settled_by_hand(sent):
         assert (b["kind"], b["league"], b["description"], b["status"], b["book"]) == ("custom", "nfl", "Chiefs -3.5 vs Bills", "open", "Hard Rock")
         assert b["legs"][0]["kind"] == "custom" and b["to_pay"] == pytest.approx(25 + 25 * 100 / 110, abs=0.01)
         assert post(league="oth", description="Arsenal to win").json()["league"] == "oth"
-        # before it starts only, a real description, real odds
+        # a real description and real odds; one that started an hour ago is added late
         past = (datetime.utcnow() - timedelta(hours=1)).isoformat() + "Z"
-        assert "started" in post(starts_at=past).json()["detail"]
+        assert post(starts_at=past).json()["late"] and not b["late"]
         assert post(description="x").status_code == 422 and post(odds=50).status_code == 422 and post(starts_at="soon").status_code == 422
         # nothing grades it or prices its close: it stays open until it's marked
         with SessionLocal() as s:
