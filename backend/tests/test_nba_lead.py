@@ -111,3 +111,11 @@ def test_leads_read_both_competitors(monkeypatch):
     assert lead._leads("1") == (13.0, 4.0)
     monkeypatch.setattr(blowout, "_get", lambda url: {"items": []})
     assert lead._leads("1") == (None, None)
+
+
+def test_add_leads_leaves_games_espn_has_no_stats_for_to_ask_again(monkeypatch, tmp_path):
+    df = _games(n=4).drop(columns=["home_lead", "away_lead"]).assign(season=2026, date=[f"2026-01-0{i + 1}" for i in range(4)])
+    monkeypatch.setattr(lead, "_leads", lambda eid: (None, None) if eid in ("2", "3") else (9.0, 4.0))
+    out = lead.add_leads(df, log=lambda m: None, path=str(tmp_path / "h.csv"))
+    # NaN in a number column, not None (pandas 3 refuses None in a float column)
+    assert out.home_lead.dtype == "float64" and out.home_lead.isna().sum() == 2 and out.away_lead.notna().sum() == 2

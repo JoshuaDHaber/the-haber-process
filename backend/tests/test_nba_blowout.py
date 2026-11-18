@@ -88,3 +88,17 @@ def test_project_prices_slate_games_with_a_spread():
     assert list(a) == list(blowout.THRESHOLDS) and a[20]["p"] > {c["margin"]: c for c in out["b"]["chances"]}[20]["p"]
     assert a[20]["p_home"] > a[20]["p_away"] and abs(a[20]["p"] - a[20]["p_home"] - a[20]["p_away"]) < 1e-9
     assert blowout.project(_games(), [dict(game_id="c", spread_line=None)])[0] == {}
+
+
+def test_history_keeps_other_columns_on_games_it_fetches_again(monkeypatch, tmp_path):
+    path = tmp_path / "h.csv"
+    _games(n=16).assign(season_type=2, home="NY", away="BOS", home_score=100.0, away_score=90.0, neutral=False, total=225.0, books=3,
+                        home_lead=12.0, away_lead=3.0).to_csv(path, index=False)
+    last = pd.read_csv(path, dtype={"event_id": str}).iloc[-1]
+
+    def fake_fetch(days, log=print):   # the overlap brings the last stored game back, without the leads nba/lead.py added
+        return pd.DataFrame([dict(last.drop(["home_lead", "away_lead"]), home_score=101.0)])
+    monkeypatch.setattr(blowout, "fetch", fake_fetch)
+    df = blowout.history(log=lambda m: None, path=str(path), today=date(2023, 10, 25))
+    row = df[df.event_id == last.event_id].iloc[0]
+    assert len(df) == 16 and row.home_score == 101.0 and (row.home_lead, row.away_lead) == (12.0, 3.0)
