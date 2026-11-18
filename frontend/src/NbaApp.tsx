@@ -23,6 +23,7 @@ import ParlayTiles from "./components/ParlayTiles";
 import PicksTable from "./components/PicksTable";
 import PlayerCompare from "./components/PlayerCompare";
 import ProjectionsTable from "./components/ProjectionsTable";
+import KingBoard from "./components/KingBoard";
 import TokenBoard from "./components/TokenBoard";
 import TopTiles, { type Tile } from "./components/TopTiles";
 import { KIND_LABEL, NBA_KINDS, easternToday, isYesNo, americanOdds, fmtProj, fmtSd, matchup, playLabel, projCaption, signedPct, timeAgo } from "./format";
@@ -40,19 +41,22 @@ import { orderTabs, PREFERRED_GAME_BOOK, useBoardBook, usePref } from "./prefs";
 const PlayerDrawer = lazy(() => importOrReload(() => import("./components/PlayerDrawer")));
 const AdminPage = lazy(() => importOrReload(() => import("./components/AdminPage")));
 
-type Tab = "games" | "picks" | "hot" | "parlays" | "token" | "injuries" | "projections" | "compare" | "check" | "admin" | "account" | "bets";
-const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["token", "Early win"], ["injuries", "Injuries"], ["projections", "Projections"], ["compare", "Compare"],
+type Tab = "games" | "picks" | "hot" | "parlays" | "promos" | "injuries" | "projections" | "compare" | "check" | "admin" | "account" | "bets";
+const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["promos", "Promos"], ["injuries", "Injuries"], ["projections", "Projections"], ["compare", "Compare"],
   ["check", "Model check"], ["admin", "Admin"]];
 /** Sections under the top bar's More menu. */
-const MORE: Tab[] = ["token", "injuries", "compare", "check", "admin"];
+const MORE: Tab[] = ["promos", "injuries", "compare", "check", "admin"];
 /** Sections only the site owner sees (signed in with an ADMIN_EMAILS account): meta.can_write. */
 const OWNER_ONLY: Tab[] = ["check", "admin"];
 /** Each section's path under /nba: /nba/props, /nba/parlays, ... (Games is the front page). */
-const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", token: "early-win", injuries: "injuries", projections: "projections", compare: "compare",
+const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", promos: "promos", injuries: "injuries", projections: "projections", compare: "compare",
   check: "model", admin: "admin", account: "account", bets: "bets" };
 /** Each section's page title (Best props and Parlays add their sportsbook picker). */
-const TITLE: Record<Tab, string> = { games: "Games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", token: "Early-win token", injuries: "Injury report", projections: "Projections",
+const TITLE: Record<Tab, string> = { games: "Games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", promos: "Promos", injuries: "Injury report", projections: "Projections",
   compare: "Compare players", check: "Model check", admin: "Admin", account: "Preferences", bets: "My bets" };
+/** The book promotions the Promos page prices, each behind a pill. */
+type Promo = "early-win" | "king";
+const PROMOS: [Promo, string][] = [["early-win", "Early win"], ["king", "King of the Court"]];
 const gameFromHash = () => new URLSearchParams(window.location.hash.slice(1)).get("game");
 /** "Tue Oct 20" from an Eastern date. */
 const day = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -92,6 +96,8 @@ export default function NbaApp() {
   const [tabOrder] = usePref("tab_order");
   // which game date to show: null follows today (or the next date with games), "all" shows both
   const [datePick, setDatePick] = useState<string | null>(() => param("date"));
+  // which promotion the Promos page shows (Early win by default)
+  const [promo, setPromo] = useState<Promo>(() => (param("promo") === "king" ? "king" : "early-win"));
 
   // the drawer and ladder read ["meta"] from the cache, so the NBA meta lives under the same key (this league has its own cache)
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.nbaMeta });
@@ -130,8 +136,9 @@ export default function NbaApp() {
     const dated = { date: datePick && datePick !== today ? datePick : null };
     setParams(tab === "picks" || tab === "projections" || tab === "hot" ? { ...filterParams(filters, tab !== "projections", boardBook), ...(tab === "hot" && { side: null }), ...dated }
       : tab === "parlays" ? { book: board.pickedBook, games: parlayGames.join(",") || null, ...dated }
-      : tab === "games" || tab === "injuries" || tab === "token" ? dated : {});
-  }, [tab, gameId, filters, board.pickedBook, parlayGames, datePick, today, boardBook]);
+      : tab === "games" || tab === "injuries" ? dated
+      : tab === "promos" ? { ...dated, promo: promo === "early-win" ? null : promo } : {});
+  }, [tab, gameId, filters, board.pickedBook, parlayGames, datePick, today, boardBook, promo]);
   const picks = useQuery({ queryKey: ["picks", debounced], queryFn: () => api.picks(debounced), enabled: tab === "picks", placeholderData: (p) => p });
   const slatePicks = useQuery({ queryKey: ["slate-picks", debounced.book, debounced.marketWeight],
     queryFn: () => api.picks({ ...debounced, kind: "all", side: "all", game: "all", q: "", minEv: 0, flagged: false, date: undefined }, 1000), enabled: onSlate });
@@ -173,8 +180,13 @@ export default function NbaApp() {
   const hasLines = Object.keys(m.odds).length > 0;
   const hasProps = NBA_KINDS.some((k) => m.odds[k]?.lines);
   const latestOdds = oddsAt;
-  const pricedPage = !!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "token";
+  const pricedPage = !!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos";
   const href = (t: Tab) => leaguePath("nba", SLUGS[t]);
+  const promoPills = (
+    <div className="seg small" role="group" aria-label="Promotion">
+      {PROMOS.map(([k, label]) => <button key={k} className={promo === k ? "on" : ""} aria-pressed={promo === k} onClick={() => setPromo(k)}>{label}</button>)}
+    </div>
+  );
   const seasonLabel = m.run ? `${m.run.season - 1}-${String(m.run.season).slice(2)}` : "";
 
   return (
@@ -187,7 +199,7 @@ export default function NbaApp() {
       </p>
 
       {!m.run && <div className="banner">No NBA projections yet. They appear after the next scheduled sync{m.auto_sync?.next_at ? ` (${localWhen(m.auto_sync.next_at)})` : ""}.</div>}
-      {m.run && !hasLines && (tab === "games" || tab === "picks" || tab === "parlays" || tab === "token") && (
+      {m.run && !hasLines && (tab === "games" || tab === "picks" || tab === "parlays" || tab === "promos") && (
         <div className="banner">{m.has_odds_key ? "No sportsbook lines are loaded yet. Moneylines come with every sync; player props are fetched the day of each game, once books post them."
           : "No NBA odds key is set (ODDS_API_KEY_NBA), so there are projections but no lines."}</div>
       )}
@@ -206,7 +218,7 @@ export default function NbaApp() {
         <PageHead
           title={tab === "picks" ? <>Best props at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
             : tab === "hot" ? <>Who's Hot at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
-            : tab === "token" ? <>Early win at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
+            : tab === "promos" ? <>Promos at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
             : tab === "parlays" && board.book ? <>Parlays at <BookSelect inline books={m.books} book={board.book} onChange={board.setBook} /></>
             : TITLE[tab]}
           aside={dates.length > 1 && tab !== "compare" && tab !== "check" && tab !== "account" && tab !== "bets" && (
@@ -222,7 +234,10 @@ export default function NbaApp() {
         {tab === "picks" && (picks.isLoading ? <Skeleton kind="rows" /> :
           <PicksTable picks={picks.data ?? []} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
         {tab === "hot" && <HotBoard board={hot} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />}
-        {tab === "token" && <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} />}
+        {tab === "promos" && (promo === "king"
+          ? <KingBoard gameday={date === "all" ? undefined : date} book={debounced.book} pills={promoPills}
+            onSelect={(pid, p) => select(pid, "pra", p ? { side: p.side, line: p.line, book: p.book } : undefined)} />
+          : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} pills={promoPills} />)}
         {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> :
           <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={dateGames} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays}
             tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={select} />)}

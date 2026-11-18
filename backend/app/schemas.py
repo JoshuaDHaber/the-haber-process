@@ -408,6 +408,36 @@ class MoneylineSide(BaseModel):
     token: Optional[LeadToken] = None   # NBA: an early-win token on this moneyline (nba/lead.token)
 
 
+class KingRow(BaseModel):
+    """One player on the King of the Court board (nba/king.py)."""
+    player_id: str
+    name: str
+    pos: str
+    team: str
+    opp: str
+    home: bool
+    game_id: str
+    gameday: str
+    gametime: str
+    status: str = ""
+    mu: float                      # projected PRA
+    sd: float
+    proj_rank: int                 # 1 = the slate's highest projection
+    p_top: float                   # the chance he has the most PRA on the slate, ties included
+    p_top3: float
+    dvp_rank: Optional[int] = None
+    dvp_n: Optional[int] = None
+    sleeper: bool = False          # outside the top projections, a soft matchup, and a real chance
+    pick: Optional[PickOut] = None # his PRA over at the board's book, when one is posted
+
+
+class KingBoard(BaseModel):
+    gameday: Optional[str] = None
+    games: int = 0
+    sims: int = 0
+    players: list[KingRow] = []
+
+
 class InjuredPlayer(BaseModel):
     player_id: str
     name: str
