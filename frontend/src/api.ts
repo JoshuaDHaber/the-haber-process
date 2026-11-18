@@ -162,7 +162,7 @@ export interface MoneylineSide {
   odds: number | null; book: string | null; ev: number | null; kelly: number | null; link: string | null; event_link: string | null;
   token?: LeadToken | null;
 }
-/** NBA: an early-win token on a moneyline, which pays as a winner once the team goes up by `threshold`. The bet cashes if it
+/** An early-win token on a moneyline, which pays as a winner once the team goes up by `threshold`. The bet cashes if it
  *  goes up by that much or wins (p_cash); games/up/up_lost are this season's record: games, how many it went up, how many of those it lost. */
 export interface LeadToken { threshold: number; p_lead: number; p_cash: number; ev: number | null; games: number; up: number; up_lost: number }
 /** A team on a winning streak (Who's hot), with its moneyline: `recent` holds its last `window` point margins, oldest first. */
@@ -183,6 +183,16 @@ export interface KingRow {
   mu: number; sd: number; proj_rank: number; p_top: number; p_top3: number; dvp_rank: number | null; dvp_n: number | null; sleeper: boolean; pick: Pick | null;
 }
 export interface KingBoard { gameday: string | null; games: number; sims: number; players: KingRow[] }
+/** NFL King of the Endzone: each entry's chance to score one game's longest touchdown (ties split: dead-heat equity). An entry is a
+ *  listed scorer (with his anytime TD at the board's book when posted), the rest of a team's offense, or its defense and returns. */
+export interface EndzoneRow {
+  player_id: string | null; name: string; pos: string; team: string; kind: "player" | "other" | "ret";
+  p_td: number; p_long: number; p_long_if_td: number; median_td: number | null; n_tds: number; status: string; pick: Pick | null;
+}
+export interface EndzoneBoard {
+  game_id: string | null; label: string; gameday: string; gametime: string; total: number | null; total_assumed: boolean; spread: number | null;
+  median_longest: number | null; p_no_td: number; p_tie: number; sims: number; rows: EndzoneRow[];
+}
 /** This week's injury report per team (both sides of the ball) plus reserve lists. Times are UTC without a zone suffix. */
 export interface InjuredPlayer {
   player_id: string; name: string; pos: string; team: string; side: "off" | "def" | "st";
@@ -303,6 +313,7 @@ export const api = {
   searchPlayers: (q: string) => get<PlayerHit[]>(lg("player-search"), { q }),
   player: (id: string, marketWeight: number | null) => get<PlayerDetail>(lg(`players/${id}`), { market_weight: marketWeight ?? undefined }),
   king: (gameday: string | undefined, book: string) => get<KingBoard>("nba/promos/king", { gameday, book: bookParam(book) }),
+  endzone: (gameId: string | undefined, book: string) => get<EndzoneBoard>("promos/endzone", { game_id: gameId, book: bookParam(book) }),
   moneylines: (book: string, marketWeight: number | null, leadBy?: number) =>
     get<MoneylineGame[]>(lg("moneylines"), { book: bookParam(book), market_weight: marketWeight ?? undefined, lead_by: leadBy }),
   /** Teams on a winning streak of the league on screen, with their moneyline at `book` (best price anywhere for "all"). */

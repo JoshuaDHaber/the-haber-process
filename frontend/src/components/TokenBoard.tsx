@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 import { api, type MoneylineGame, type MoneylineSide } from "../api";
 import { americanOdds, kickoff, matchup, pct, signedPct } from "../format";
+import type { League } from "../league";
+import { useLeague } from "../LeagueContext";
 import { sidePick } from "../moneyline";
 import { useSort } from "../useSort";
 import { BookName } from "./BookBadge";
@@ -12,9 +14,12 @@ import Skeleton from "./Skeleton";
 import SortBar from "./SortBar";
 import { PickAvatar } from "./TeamLogo";
 
-/** Leads an early-win promo might ask for; FanDuel's NBA token is 10 (backend nba/lead.THRESHOLD). */
-const LEADS = [5, 8, 10, 12, 15] as const;
-const DEFAULT_LEAD = 10;
+/** Per league: the leads an early-win promo might ask for, FanDuel's own (backend nba/lead.THRESHOLD, engine/early_win.THRESHOLD),
+ *  and how far back the largest leads the chances are fitted on go. NFL leads under 14 run high (touchdowns jump the score by 7). */
+const LEAD_SETUP: Record<League, { leads: number[]; fanduel: number; since: string }> = {
+  nba: { leads: [5, 8, 10, 12, 15], fanduel: 10, since: "2018-19" },
+  nfl: { leads: [14, 17, 21], fanduel: 17, since: "2018" },
+};
 /** Model and market this far apart (in win chance) usually means news the model hasn't seen: an injury or a rest day. */
 const SPLIT = 0.12;
 
@@ -30,7 +35,9 @@ function SeasonRecord({ s }: { s: MoneylineSide }) {
 /** Every side on the slate priced for an early-win token: the chance it goes up by the lead, the chance the bet cashes (up by
  *  the lead or a win) and that bet's EV at the board's book, best first. */
 export default function TokenBoard({ book, marketWeight, gameIds, pills }: { book: string; marketWeight: number | null; gameIds: string[]; pills: ReactNode }) {
-  const [lead, setLead] = useState<number>(DEFAULT_LEAD);
+  const { league } = useLeague();
+  const { leads, fanduel, since } = LEAD_SETUP[league];
+  const [lead, setLead] = useState<number>(fanduel);
   const q = useQuery({ queryKey: ["moneylines", book, marketWeight, lead], queryFn: () => api.moneylines(book, marketWeight, lead), placeholderData: (p) => p });
   const rows = useMemo<Row[]>(() => (q.data ?? []).filter((g) => gameIds.includes(g.game_id)).flatMap((g) => g.sides
     .filter((s) => s.token)
@@ -43,13 +50,13 @@ export default function TokenBoard({ book, marketWeight, gameIds, pills }: { boo
         {pills}
         <div className="seg small" role="group" aria-label="Lead the token needs">
           <span className="mut seg-label">Pays once up by</span>
-          {LEADS.map((n) => <button key={n} className={lead === n ? "on" : ""} aria-pressed={lead === n} onClick={() => setLead(n)}>{n}</button>)}
+          {leads.map((n) => <button key={n} className={lead === n ? "on" : ""} aria-pressed={lead === n} onClick={() => setLead(n)}>{n}</button>)}
         </div>
       </div>
       <HowToRead storageKey="how-to-read-token-dismissed">
         <ol>
           <li>An early-win token pays a moneyline as a winner once the team goes up by {lead}, whatever happens after. So the bet cashes if the team goes up {lead} <b>or</b> wins.</li>
-          <li><b>Up {lead}</b> is the chance the team leads by {lead}+ at some point; <b>Cashes</b> adds the games it wins without ever getting there. Both come from the market spread, fitted on every game's largest lead since 2018-19.</li>
+          <li><b>Up {lead}</b> is the chance the team leads by {lead}+ at some point; <b>Cashes</b> adds the games it wins without ever getting there. Both come from the market spread, fitted on every game's largest lead since {since}.</li>
           <li><b>Token EV</b> <Info term="ev" /> is the bet's return with the token at the price shown. It's highest on underdogs: a favorite that goes up {lead} usually wins anyway, so the token adds little.</li>
           <li><b>Model ≠ market</b> marks a game where the team model and the books disagree by {Math.round(SPLIT * 100)}+ points, usually an injury or rest day. Check the news before trusting either.</li>
         </ol>

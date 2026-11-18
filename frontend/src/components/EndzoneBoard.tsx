@@ -1,0 +1,105 @@
+import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { api, type EndzoneRow, type Game, type Pick } from "../api";
+import { americanOdds, kickoff, pct, signedPct } from "../format";
+import { toAmerican } from "../slip";
+import { useSort } from "../useSort";
+import { BookName } from "./BookBadge";
+import HowToRead from "./HowToRead";
+import Info from "./Info";
+import Menu, { MenuItem } from "./Menu";
+import Skeleton from "./Skeleton";
+import SortBar from "./SortBar";
+import { PickAvatar } from "./TeamLogo";
+
+/** "+900": the price at which a chance breaks even. */
+const fair = (p: number) => americanOdds(Math.round(toAmerican(1 / p)));
+
+type Select = (r: EndzoneRow) => void;
+
+/** One entry: who (a player, the rest of an offense, or a defense), his anytime TD at the book, how long his touchdowns run, how
+ *  often a touchdown of his is the game's longest, and his chance of the longest TD. A player's row opens his anytime-TD drawer. */
+function Row({ r, gameId, onSelect }: { r: EndzoneRow; gameId: string; onSelect: Select }) {
+  const p = r.pick;
+  const player = r.kind === "player";
+  const open = player ? () => onSelect(r) : undefined;
+  return (
+    <tr onClick={open} className={player ? "clickable" : "no-tap"} tabIndex={player ? 0 : undefined} onKeyDown={player ? (e) => e.key === "Enter" && onSelect(r) : undefined}>
+      <td>
+        <div className="pcell">
+          <PickAvatar name={r.name} kind={player ? "td" : "ml"} team={r.team} gameId={gameId} size={34} />
+          <div>
+            <b>{r.name}</b> {player && <><span className="pos-pill">{r.pos}</span> <span className="mut">{r.team}</span></>}
+            {r.status && <span className="q"> {r.status}</span>}
+            <br /><span className="mut">{player ? (r.n_tds ? `${r.n_tds} TD${r.n_tds === 1 ? "" : "s"} in three seasons` : "No recent TDs: his position's lengths")
+              : r.kind === "other" ? "Everyone not listed, at league-wide lengths" : "Defensive and return TDs"}</span>
+          </div>
+        </div>
+      </td>
+      <td data-label="Anytime TD"><b>{pct(r.p_td, 0)}</b>
+        {p && <><br /><span className="mut">{americanOdds(p.odds)} · <BookName book={p.book} size={14} /></span></>}</td>
+      <td data-label="Median TD">{r.median_td == null ? <span className="mut">–</span> : <>{Math.round(r.median_td)} yds</>}</td>
+      <td data-label="If he scores">{pct(r.p_long_if_td, 0)}</td>
+      <td data-label="Longest TD"><b>{pct(r.p_long, r.p_long < 0.1 ? 1 : 0)}</b><span className="meter" aria-hidden><i style={{ width: `${Math.min(100, r.p_long * 400)}%` }} /></span>
+        <span className="mut">fair {fair(r.p_long)}</span></td>
+      <td className={`c-ev${p ? "" : " no-price"}`}>{p ? <span className={`ev-pill${p.ev < 0 ? " neg" : ""}`} title="EV of his anytime TD at this price">{signedPct(p.ev)}</span> : <span className="mut">–</span>}</td>
+    </tr>
+  );
+}
+
+/** King of the Endzone: who's most likely to score one game's longest touchdown, with the game picker beside the promo pills. */
+export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSelect }: {
+  games: Game[]; gameId: string | null; onGame: (id: string) => void; book: string; pills: ReactNode; onSelect: (pid: string, pick?: Pick | null) => void;
+}) {
+  const q = useQuery({ queryKey: ["endzone", gameId, book], queryFn: () => api.endzone(gameId ?? undefined, book), placeholderData: (p) => p });
+  const b = q.data;
+  const rows = b?.rows ?? [];
+  const { sorted, toggle, arrow } = useSort(rows, "p_long");
+  const shown = games.find((g) => g.game_id === b?.game_id);
+  const select: Select = (r) => r.player_id && onSelect(r.player_id, r.pick);
+  return (
+    <>
+      <div className="hot-bar">
+        {pills}
+        {games.length > 0 && (
+          <Menu align="start" ariaLabel={`Game: ${shown?.label ?? "next game"}`} label={shown?.label ?? "Next game"}>
+            {(close) => games.map((g) => (
+              <MenuItem key={g.game_id} on={b?.game_id === g.game_id} onClick={() => { close(); onGame(g.game_id); }}>
+                {g.label} <span className="mut">{kickoff(g.gameday, g.gametime)}</span>
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
+      </div>
+      <HowToRead storageKey="how-to-read-endzone-dismissed">
+        <ol>
+          <li>King of the Endzone pays when your player scores the game's longest touchdown. Ties are usually paid as a dead heat, so they count here as a share.</li>
+          <li><b>Longest TD</b> is that chance across {(b?.sims ?? 100000).toLocaleString()} simulated games. Each player scores from his anytime-TD chance, and each of his TDs is as long as one of his own from the last three seasons, pulled toward his position's. <b>Fair</b> is the price where the chance breaks even.</li>
+          <li><b>If he scores</b> is how often his TD is the longest when he gets one. Deep threats rank high here, goal-line backs low, so a big anytime chance alone doesn't win this.</li>
+          <li><b>Rest of offense</b> covers everyone not listed, and <b>defense & returns</b> covers pick-sixes and return TDs, which are nearly always long. Team TDs come from the game total and spread.</li>
+        </ol>
+      </HowToRead>
+      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Endzone.</p> : !rows.length ? (
+        <div className="card empty">No touchdown chances for this game yet. They come with each sync once the week's projections are in.</div>
+      ) : <>
+        <SortBar toggle={toggle} arrow={arrow} options={[["p_long", "Longest TD"], ["p_long_if_td", "If he scores"], ["p_td", "Anytime TD"], ["name", "Name"]]} />
+        <section className="hot-teams" aria-labelledby="endzone-h">
+          <h3 id="endzone-h" className="sub-h">{b!.label} <span className="mut">· {kickoff(b!.gameday, b!.gametime)}
+            {b!.median_longest != null && <> · longest TD usually {Math.round(b!.median_longest)} yds</>}
+            {b!.total != null && <> · total {b!.total_assumed ? <span title="No total posted for this game yet: the league's average game">{Math.round(b!.total)} (league average)</span> : b!.total}</>}</span></h3>
+          <div className="card scroll cards">
+            <table className="t-hot">
+              <thead>
+                <tr>
+                  <th scope="col">Player</th><th scope="col">Anytime TD</th><th scope="col">Median TD</th>
+                  <th scope="col">If he scores</th><th scope="col">Longest TD</th><th scope="col">EV <Info term="ev" /></th>
+                </tr>
+              </thead>
+              <tbody>{sorted.map((r) => <Row key={`${r.kind}-${r.player_id ?? r.team}`} r={r} gameId={b!.game_id!} onSelect={select} />)}</tbody>
+            </table>
+          </div>
+        </section>
+      </>}
+    </>
+  );
+}
