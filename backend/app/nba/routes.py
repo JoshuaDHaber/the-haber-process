@@ -16,7 +16,7 @@ from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, c
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import odds
-from ..engine.ladder import build_ladder, calibrated_mu, ladder_curve
+from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, ladder_curve
 from ..engine.market import curve_for, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
@@ -399,7 +399,7 @@ def player_lines(player_id: str, kind: NbaKind, odds_range: int = Query(300, ge=
     fetched = max((r.fetched_at for r in alts), default=None)
     return LadderOut(kind=kind, mu=p.mu, sd=p.sd, game_id=p.game_id, alt_fetched_at=fetched.isoformat() if fetched else None,
                      curve=curve, w=w if curve else None,
-                     quotes=build_ladder(mu, p.sd, quotes, odds_range, kind, dist, curve, w))
+                     quotes=build_ladder(mu, p.sd, quotes, odds_range, kind, dist, curve, w, long_shot=ALT_OVER_LONG_SHOT))
 
 
 def _proj(db: Session, run: Optional[NbaRun], player_id: str, kind: str) -> NbaProjection:

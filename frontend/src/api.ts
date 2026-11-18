@@ -145,8 +145,10 @@ export interface PlayerDetail {
 }
 
 /** prob blends the model (p_model) with the market curve read off the whole ladder (p_curve); off_curve is the EV against the
- *  curve alone: positive means the price beats what the books' own ladder implies. */
-export interface QuoteSide { odds: number; prob: number; ev: number; link: string | null; p_model?: number | null; p_curve?: number | null; off_curve?: number | null }
+ *  curve alone: positive means the price beats what the books' own ladder implies. flag "long shot": an NBA alternate over
+ *  longer than +250, which has hit well below its price, so its EV isn't counted as an edge. */
+export interface QuoteSide { odds: number; prob: number; ev: number; link: string | null; p_model?: number | null; p_curve?: number | null; off_curve?: number | null;
+  flag?: "" | "long shot" }
 export interface LadderRow { line: number; book: string; alt: boolean; event_link: string | null; over: QuoteSide | null; under: QuoteSide | null }
 export interface Ladder { kind: Kind; mu: number; sd: number; game_id: string; alt_fetched_at: string | null; quotes: LadderRow[];
   /** The market's distribution read off the ladder (location m, spread s, its median) and the weight it gets in each rung's chance. */

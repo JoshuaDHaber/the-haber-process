@@ -10,6 +10,11 @@ import Skeleton from "./Skeleton";
 
 export interface PlayerCtx { playerId: string; name: string; team: string; opp: string; home: boolean; gameId: string }
 
+const LONG_SHOT_TITLE = "An alternate over longer than +250. These have hit well below their price (about 12% when the model said 14%), so the EV isn't counted as an edge";
+
+/** A positive-EV side that isn't flagged: what the green highlight and "+EV only" count. */
+const isEdge = (q: QuoteSide | null | undefined) => !!q && q.ev > 0 && !q.flag;
+
 /** One side of one rung: the price, and the quote row it came from (its book, links and alt flag). */
 export interface Cell { side: "Over" | "Under"; row: LadderRow; q: QuoteSide }
 
@@ -61,7 +66,7 @@ export default function LineLadder({ ctx, kind, mu, book, onBookChange, marketWe
   const onlyBook = book !== "all";
   const rows = useMemo(() => ladderRows((ladder.data?.quotes ?? []).filter((q) => !onlyBook || q.book === book), allBooks || onlyBook),
     [ladder.data, allBooks, onlyBook, book]);
-  const shown = onlyEv ? rows.filter((r) => (r.over?.q.ev ?? -1) > 0 || (r.under?.q.ev ?? -1) > 0) : rows;
+  const shown = onlyEv ? rows.filter((r) => isEdge(r.over?.q) || isEdge(r.under?.q)) : rows;
   const hasAlt = (ladder.data?.quotes ?? []).some((q) => q.alt);
   // alternate ladders are often priced on one side only: a column of dashes says nothing, so it's left out
   const showOver = !shown.length || shown.some((r) => r.over), showUnder = !shown.length || shown.some((r) => r.under);
@@ -79,12 +84,13 @@ export default function LineLadder({ ctx, kind, mu, book, onBookChange, marketWe
     const clash = !inSlip && slip.wouldClash(toLeg(c));
     const clashNote = `already on your slip at ${c.row.book}: books usually won't parlay both`;
     return (
-      <td className={`lcell ${c.q.ev > 0 ? "plus" : ""}`}>
+      <td className={`lcell ${isEdge(c.q) ? "plus" : ""}`}>
         <button className={`add ${inSlip ? "on" : ""}${clash ? " clash" : ""}`} type="button" onClick={() => slip.toggle(toLeg(c))} title={clash ? `Another ${KIND_LABEL[kind]} line is ${clashNote}` : undefined}
           aria-label={`${inSlip ? "Remove" : "Add"} ${playLabel(kind, c.side, c.row.line)} at ${c.row.book}${clash ? `. Another line of this prop is ${clashNote}` : ""}`}>{inSlip ? "✓" : "+"}</button>
         <span className="lc-main"><span className="odds">{americanOdds(c.q.odds)}</span>
-          <span className={c.q.ev > 0 ? "pos" : "mut"}> {signedPct(c.q.ev)}</span>
-          {(c.q.off_curve ?? 0) >= BEATS_LADDER && <span className="beats" title={`The books' own ladder puts this at ${pct(c.q.p_curve ?? 0)}; at ${americanOdds(c.q.odds)} that's ${signedPct(c.q.off_curve!)} EV before the model has a say.`}>beats ladder</span>}<br />
+          <span className={isEdge(c.q) ? "pos" : "mut"}> {signedPct(c.q.ev)}</span>
+          {c.q.flag && <span className="flag" title={LONG_SHOT_TITLE}>{c.q.flag}</span>}
+          {!c.q.flag && (c.q.off_curve ?? 0) >= BEATS_LADDER && <span className="beats" title={`The books' own ladder puts this at ${pct(c.q.p_curve ?? 0)}; at ${americanOdds(c.q.odds)} that's ${signedPct(c.q.off_curve!)} EV before the model has a say.`}>beats ladder</span>}<br />
           <span className="mut"><BookName book={c.row.book} size={14} /></span></span>
       </td>
     );

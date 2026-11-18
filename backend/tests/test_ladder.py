@@ -63,3 +63,17 @@ def test_calibrated_mu_moves_the_projection_so_the_main_line_matches_the_curve()
     # Poisson counts (threes, steals, blocks) too
     pois = calibrated_mu(3.0, 0.0, 1.5, "threes", {"poisson": True}, curve)
     assert 1.5 < pois < 3.0
+
+
+def test_long_shot_alternate_overs_are_flagged_only_when_asked():
+    q = pd.DataFrame([
+        dict(line=30.5, book="A", alt=True, over_odds=300, under_odds=None, over_link=None, under_link=None, event_link=None),
+        dict(line=26.5, book="A", alt=True, over_odds=200, under_odds=None, over_link=None, under_link=None, event_link=None),
+        dict(line=30.5, book="B", alt=False, over_odds=300, under_odds=-450, over_link=None, under_link=None, event_link=None),
+    ])
+    rows = {(r["line"], r["book"]): r for r in build_ladder(25, 6, q, long_shot=250)}
+    assert rows[(30.5, "A")]["over"]["flag"] == "long shot"
+    assert rows[(26.5, "A")]["over"]["flag"] == ""                     # +200: short enough
+    assert rows[(30.5, "B")]["over"]["flag"] == ""                     # a main line, not an alternate
+    assert rows[(30.5, "B")]["under"]["flag"] == ""
+    assert all(r["over"]["flag"] == "" for r in build_ladder(25, 6, q))   # NFL ladders pass no limit

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main, scheduler
-from app.db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal
+from app.db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, NbaRunTables, SessionLocal
 from app.nba import blowout, espn, model
 from app.nba import pipeline as nba_pipeline
 from app.nba import routes as nba_routes
@@ -208,6 +208,8 @@ def test_nba_run_stores_same_game_correlations(monkeypatch):
         run = s.get(NbaRun, rid)
         corr = run.variance["_correlation"]
         b = run.teams[game["game_id"]]["blowout"]
+        kept = s.get(NbaRunTables, rid).tables   # the error tables, kept after the run is pruned
+    assert kept == {k: v for k, v in run.variance.items() if not k.startswith("_") or k == "_doubles"} and "pts" in kept
     assert b["games"] == 800 and [c["margin"] for c in b["chances"]] == list(blowout.THRESHOLDS)
     assert 0.1 < b["chances"][1]["p"] < 0.3 and b["chances"][1]["p_away"] > b["chances"][1]["p_home"]   # NY favored by 2.5
     pairs = corr["pairs"]

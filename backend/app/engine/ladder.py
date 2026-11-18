@@ -32,14 +32,23 @@ def ladder_curve(quotes: pd.DataFrame, mu: float, kind: str, dist: dict = None, 
     return mkt.fit_market_curve(mkt.ladder_fair(quotes), mu, dist, book_weights)
 
 
+# Alternate overs priced longer than this are flagged "long shot" (the NBA ladder's long_shot). Backtested on every
+# NBA ladder rung from Oct 26 to Nov 18, 2026 (107k lines, graded against the box score): the 4,790 alternate overs
+# at +250 or longer with EV 3-20% hit 11.7% where the blend said 14.3%, -19% ROI at the best price, while shorter
+# alternate overs were near break-even (-3%). Past two typical misses above the line the model's error table says
+# 2.4% and players got there 1.4% of the time, and the books' own one-sided prices lean the same way.
+ALT_OVER_LONG_SHOT = 250
+
+
 def build_ladder(mu: float, sd: float, quotes: pd.DataFrame, max_abs_odds: float = 0, kind: str = "", dist: dict = None,
-                 curve: dict = None, w: float = 0.0) -> list[dict]:
+                 curve: dict = None, w: float = 0.0, long_shot: float = None) -> list[dict]:
     """quotes columns: line, book, alt, over_odds, under_odds, over_link, under_link, event_link.
 
     max_abs_odds > 0 hides prices outside -max..+max (American), e.g. 300 hides -400 locks and +900 longshots.
     It doesn't apply to anytime or first TD, where +400 to +2000 are ordinary prices.
     With a market curve (ladder_curve), each rung's chance is (1 - w) * model + w * curve, and off_curve is the rung's EV
-    against the curve alone: a price better than the book's own ladder implies, whatever the model says."""
+    against the curve alone: a price better than the book's own ladder implies, whatever the model says.
+    long_shot: an alternate rung's over priced longer than this gets flag "long shot" (ALT_OVER_LONG_SHOT; none without)."""
     out = []
     # anytime TD: lean on the market's chance (the lone Yes prices, margin stripped), as the Best props board does
     td_market, floor = None, MIN_MARKET_WEIGHT.get(kind, 0.0)
@@ -62,8 +71,9 @@ def build_ladder(mu: float, sd: float, quotes: pd.DataFrame, max_abs_odds: float
                     p = (1 - w) * p_model + w * p_curve
                     ev = p * (dec - 1) - (1 - p)
                     off = p_curve * dec - 1
+                flag = "long shot" if long_shot is not None and side == "over" and bool(q.alt) and odd > long_shot else ""
                 row[side] = dict(odds=int(odd), prob=p, ev=ev, link=_none(getattr(q, f"{side}_link")), p_model=p_model,
-                                 p_curve=p_curve, off_curve=off)
+                                 p_curve=p_curve, off_curve=off, flag=flag)
         if row["over"] or row["under"]:
             out.append(row)
     return sorted(out, key=lambda r: (r["line"], r["book"]))

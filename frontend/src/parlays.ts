@@ -193,7 +193,7 @@ export function ladderRungs(base: Pick, ladder: Ladder | undefined, book: string
   const byLine = new Map<number, ParlayLeg>();
   for (const r of ladder?.quotes ?? []) {
     const q = r.over;
-    if (r.book !== book || !q || q.odds < minOdds || linkStatus({ link: q.link }, "xx") !== "direct") continue;
+    if (r.book !== book || !q || q.flag || q.odds < minOdds || linkStatus({ link: q.link }, "xx") !== "direct") continue;
     const dec = toDecimal(q.odds);
     const prob = (1 - LADDER_MARKET_WEIGHT) * q.prob + LADDER_MARKET_WEIGHT / dec;
     if (prob < LADDER_MIN_PROB) continue;
