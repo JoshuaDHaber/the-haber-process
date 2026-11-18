@@ -12,7 +12,7 @@ export const GLOSSARY = {
   steam: ["Steam", "Three or more books moved this line the same way between the last two odds fetches, with none moving against it."],
   clv: ["Closing line value", "Whether the market moved toward a pick after it was posted. Beating the closing price is the quickest honest test of an edge: results take hundreds of bets to say anything."],
   curve: ["Market curve", "The books' whole distribution for this player, read off every main and alternate line. A rung marked 'beats ladder' is priced better than the books' own ladder implies, whatever the model says."],
-  gaps: ["Large gaps", "Plays where the model and the market disagree by 40% or more. Usually the model is missing something, so they're hidden by default."],
+  gaps: ["Large gaps", "Plays where the model and the market disagree by 40% or more (25% for rushing, receiving and passing yards). Usually the model is missing something, so they're hidden by default."],
   winProb: ["Win prob", "The chance this side hits: the model's chance blended with the market's (see Trust market)."],
   blend: ["Model and market", "Win prob mixes two chances: the model's, and the sportsbooks' own with their margin taken out. The blend is how much each counts: 67/33 means two parts model to one part market. Markets the model reads less well lean on the books more."],
   edge: ["Edge", "How far the projection is from the line, in yards (catches for receptions). For yes/no markets, the model's chance minus the market's, in points."],

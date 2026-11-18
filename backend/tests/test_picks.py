@@ -117,10 +117,10 @@ def test_passing_tds_are_flagged_on_chances_not_the_projection_to_line_ratio():
 
 
 def test_a_teammate_out_tags_both_sides_without_flagging_either():
-    p = proj(name="Wide Out", pos="WR", kind="rec", mu=30.0, sd=20.0, teammate_out="Missing Receiver")
+    p = proj(name="Wide Out", pos="WR", kind="rec", mu=33.0, sd=20.0, teammate_out="Missing Receiver")
     picks = build_picks(p, lines([("Wide Out", "rec", 40.5, -110, -110, "A")]))
     assert (picks.teammate_out == "Missing Receiver").all() and not picks.flagged.any() and (picks.flag == "").all()
-    plain = build_picks(proj(name="Wide Out", pos="WR", kind="rec", mu=30.0, sd=20.0), lines([("Wide Out", "rec", 40.5, -110, -110, "A")]))
+    plain = build_picks(proj(name="Wide Out", pos="WR", kind="rec", mu=33.0, sd=20.0), lines([("Wide Out", "rec", 40.5, -110, -110, "A")]))
     assert not plain.flagged.any() and (plain.flag == "").all()          # runs stored before the tag existed have no column
     gap = build_picks(proj(name="Wide Out", pos="WR", kind="rec", mu=10.0, sd=20.0, teammate_out="X"),
                       lines([("Wide Out", "rec", 40.5, -110, -110, "A")]))
@@ -131,3 +131,28 @@ def test_thin_history_projections_are_never_priced():
     ln = lines([("Test Back", "rush", 60.5, -110, -110, "A")])
     assert build_picks(proj(mu=90, thin=True), ln).empty
     assert not build_picks(proj(mu=90, thin=False), ln).empty
+
+
+def test_a_books_extra_main_market_lines_are_alternates_and_never_priced():
+    # Bovada posts a ladder in the main market; only its line nearest the consensus counts, for the board and the market
+    ln = lines([("Test Back", "rush", 68.5, -115, -115, "A"), ("Test Back", "rush", 67.5, -110, -120, "B"),
+                ("Test Back", "rush", 48.5, 315, -450, "Bovada"), ("Test Back", "rush", 58.5, 150, -190, "Bovada"),
+                ("Test Back", "rush", 68.5, -115, -115, "Bovada"), ("Test Back", "rush", 78.5, -170, 135, "Bovada"),
+                ("Test Back", "rush", 88.5, -300, 225, "Bovada")])
+    picks = build_picks(proj(mu=70), ln, best_only=False)
+    assert set(picks[picks.book == "Bovada"].line) == {68.5}
+    assert (picks.books == 3).all()
+    # a book's lone quote is kept even when it's off the others (that's for the stale-line gap to judge)
+    lone = build_picks(proj(mu=70), lines([("Test Back", "rush", 68.5, -115, -115, "A"),
+                                           ("Test Back", "rush", 62.5, -115, -115, "C")]), best_only=False)
+    assert set(lone.book) == {"A", "C"}
+
+
+def test_yardage_projections_far_from_the_line_are_flagged_sooner_than_receptions():
+    ln = lambda kind, line: lines([("Test Back", kind, line, -110, -110, "A")])
+    assert not build_picks(proj(mu=74.0), ln("rush", 60.5)).flagged.any()      # 22% over the line
+    assert build_picks(proj(mu=78.0), ln("rush", 60.5)).flagged.all()          # 29%: past YARDS_GAP
+    assert build_picks(proj(mu=44.0), ln("rush", 60.5)).flagged.all()          # 27% under
+    assert build_picks(proj(kind="pass", mu=180.0), ln("pass", 250.5)).flagged.all()
+    # receptions keep the wide band: the model's disagreement there held up in the graded picks
+    assert not build_picks(proj(kind="recs", mu=5.5), ln("recs", 4.5)).flagged.any()
