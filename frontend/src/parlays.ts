@@ -296,6 +296,12 @@ export function buildLadderParlays(entries: LadderEntry[], book: string, corr?: 
 // ---------- NBA threes ladders: only made-threes overs, each rung a likely hit (mostly the 1+ and 2+ alternates) ----------
 /** Players whose threes ladder is pulled for them. */
 export const THREES_PLAYERS = 12;
+/** Threes overs whose ladders are pulled to find THREES_PLAYERS usable ones: many of the likeliest have no rung that passes
+ *  ladderRungs at the chosen book (no betslip link, 1+ shorter than -1000, 2+ under 60%). On Nov 18, 2026 one of FanDuel's
+ *  top 12 had none and four had a single rung, so the tiles chose among about eight players and the same names kept coming up. */
+export const THREES_CANDIDATES = 20;
+/** Most threes tiles one player appears in on a slate. */
+export const THREES_MAX_TILES_PER_PLAYER = 2;
 /** Shortest price on a threes rung: 1+ made is usually -500 to -1000, so the usual -400 floor left nothing. */
 export const THREES_MIN_ODDS = -1000;
 /** One tile per combined-price band. The cheap band keeps every rung at 70%+, which means many short-priced 1+ legs;
@@ -309,16 +315,21 @@ export const THREES_BANDS = [
 /** For each threes band, the likeliest combination of different players' threes overs at this book whose price lands in it,
  *  each rung at least the band's chance. Skips a tile that repeats an earlier one or one in `existing`. */
 export function buildThreesLadders(entries: LadderEntry[], book: string, existing: Parlay[] = [], corr?: CorrTable): Parlay[] {
-  const rungs = entries.filter((e) => e.base.kind === "threes").map((e) => ladderRungs(e.base, e.ladder, book, THREES_MIN_ODDS));
+  // entries come likeliest first: the first THREES_PLAYERS with a usable rung at this book
+  const rungs = entries.filter((e) => e.base.kind === "threes").map((e) => ladderRungs(e.base, e.ladder, book, THREES_MIN_ODDS))
+    .filter((r) => r.length).slice(0, THREES_PLAYERS);
   const seen = new Set(existing.map((p) => p.legs.map(pickKey).sort().join("&")));
   const out: Parlay[] = [];
+  const tiles = new Map<string, number>();   // player -> threes tiles he's in so far
   for (const band of THREES_BANDS) {
-    const players = rungs.map((r) => r.filter((l) => l.prob >= band.minProb)).filter((r) => r.length);
+    const players = rungs.filter((r) => (tiles.get(r[0].player_id) ?? 0) < THREES_MAX_TILES_PER_PLAYER)
+      .map((r) => r.filter((l) => l.prob >= band.minProb)).filter((r) => r.length);
     const [legs] = searchLadders(players, [band], undefined, corr, band.maxLegs, out.map((p) => p.legs));
     if (!legs) continue;
     const sig = legs.map(pickKey).sort().join("&");
     if (seen.has(sig)) continue;
     seen.add(sig);
+    for (const l of legs) tiles.set(l.player_id, (tiles.get(l.player_id) ?? 0) + 1);
     out.push({ key: band.key, title: band.title, blurb: `Alternate threes overs, every leg at least ${Math.round(band.minProb * 100)}% likely.`,
       legs, ...priceParlay(legs, corr) });
   }

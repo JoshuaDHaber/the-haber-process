@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Ladder, LadderRow, Pick } from "./api";
-import { bestBook, buildBalancedLadders, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays } from "./parlays";
+import { bestBook, buildBalancedLadders, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays, THREES_MAX_TILES_PER_PLAYER, THREES_PLAYERS } from "./parlays";
 import { setLeague } from "./league";
 import { toAmerican, toDecimal } from "./slip";
 
@@ -308,7 +308,7 @@ describe("threes ladders", () => {
     for (const p of parlays) expect(p.legs.every((l) => l.kind === "threes" && l.prob >= 0.7)).toBe(true);
   });
   it("stacks short-priced 1+ rungs for the cheap band and takes 2+ lines in fewer legs for the dear one", () => {
-    const es = ["a", "b", "c", "d", "e", "f", "g"].map((id) => t(id, rung(0.5, -600, 0.9), rung(1.5, -180, 0.66)));
+    const es = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"].map((id) => t(id, rung(0.5, -600, 0.9), rung(1.5, -180, 0.66)));
     const parlays = buildThreesLadders(es, "DraftKings");
     const cheap = parlays.find((p) => p.key === "threes-1")!, dear = parlays.find((p) => p.key === "threes-3")!;
     expect(cheap.legs.length).toBeGreaterThan(4);
@@ -316,6 +316,23 @@ describe("threes ladders", () => {
     expect(dear.legs.length).toBeLessThanOrEqual(4);
     expect(dear.legs.some((l) => l.line === 1.5)).toBe(true);
     expect(buildThreesLadders([t("a", rung(0.5, -1500, 0.97)), t("b", rung(0.5, -1500, 0.97))], "DraftKings")).toEqual([]);
+  });
+  it("fills its 12 players from the likeliest that have a usable rung, past the ones that don't", () => {
+    const none = Array.from({ length: 6 }, (_, i) => t(`x${i}`, rung(0.5, -1500, 0.97)));   // 1+ too short: nothing usable
+    const usable = Array.from({ length: 14 }, (_, i) => t(`u${i}`, rung(0.5, -600, 0.9), rung(1.5, -180, 0.66)));
+    const used = new Set(buildThreesLadders([...none, ...usable], "DraftKings").flatMap((p) => p.legs.map((l) => l.player_id)));
+    expect(used.size).toBeGreaterThan(0);
+    expect([...used].every((id) => id.startsWith("u") && Number(id.slice(1)) < THREES_PLAYERS)).toBe(true);   // the first 12 usable
+  });
+  it("puts no player in more than two threes tiles", () => {
+    // three standouts and a field of weaker shooters: without the cap the standouts lead every tile
+    const stars = ["s1", "s2", "s3"].map((id) => t(id, rung(0.5, -700, 0.95), rung(1.5, -150, 0.75)));
+    const field = ["f1", "f2", "f3", "f4", "f5", "f6"].map((id) => t(id, rung(0.5, -600, 0.88), rung(1.5, -180, 0.66)));
+    const parlays = buildThreesLadders([...stars, ...field], "DraftKings");
+    expect(parlays.length).toBe(3);
+    const count = new Map<string, number>();
+    for (const p of parlays) for (const l of p.legs) count.set(l.player_id, (count.get(l.player_id) ?? 0) + 1);
+    expect(Math.max(...count.values())).toBeLessThanOrEqual(THREES_MAX_TILES_PER_PLAYER);
   });
   it("skips a combination already shown", () => {
     const es = [t("a", rung(0.5, -250, 0.8)), t("b", rung(0.5, -250, 0.8)), t("c", rung(0.5, -250, 0.8))];

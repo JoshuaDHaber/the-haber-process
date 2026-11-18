@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { api, type Filters } from "./api";
 import { getLeague } from "./league";
 import { moneylinePicks } from "./moneyline";
-import { buildBalancedLadders, buildLadderParlays, buildTdParlays, buildThreesLadders, defaultBook, filterGames, ladderProps, ladderTargets, LADDER_PLAYERS_PER_TEAM, moneylineRungs, parlaysByBook, THREES_PLAYERS, type ParlayLeg } from "./parlays";
+import { buildBalancedLadders, buildLadderParlays, buildTdParlays, buildThreesLadders, defaultBook, filterGames, ladderProps, ladderTargets, LADDER_PLAYERS_PER_TEAM, moneylineRungs, parlaysByBook, THREES_CANDIDATES, type ParlayLeg } from "./parlays";
 import { usePref } from "./prefs";
 
 // Parlays rank by win probability, not EV, so they price every play (any EV) at the default market weight
@@ -64,7 +64,7 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
   const balancedLadders = useMemo(() => activeBook ? buildBalancedLadders(ladderEntries, activeBook, chosenGames.slice(0, 4), ladderParlays, corr, mlRungs) : [],
     [activeBook, ladderEntries, chosenGames, ladderParlays, corr, mlRungs]);
   // NBA: threes-only ladders from the likeliest threes overs (their ladders share the cache with the ones above)
-  const threesTargets = useMemo(() => (!hasTd && activeBook ? ladderTargets(gamePicks[activeBook] ?? [], THREES_PLAYERS, LADDER_PLAYERS_PER_TEAM, ["threes"]) : []),
+  const threesTargets = useMemo(() => (!hasTd && activeBook ? ladderTargets(gamePicks[activeBook] ?? [], THREES_CANDIDATES, LADDER_PLAYERS_PER_TEAM, ["threes"]) : []),
     [hasTd, activeBook, gamePicks]);
   const threesQueries = useQueries({
     queries: threesTargets.map((t) => ({ queryKey: ["ladder", t.player_id, t.kind, 0], queryFn: () => api.lines(t.player_id, t.kind, 0), enabled })),
