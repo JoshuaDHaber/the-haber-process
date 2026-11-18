@@ -127,6 +127,11 @@ def history(log=print, path: str = HISTORY_CSV, today: Optional[date] = None) ->
     days = [d for s in range(FIRST_SEASON, espn.season_for(today) + 1) for d in _season_days(s) if start <= d < today]
     log(f"blowout history: {len(old)} stored games; fetching {days[0] if days else '-'} to {days[-1] if days else '-'}")
     new = fetch(days, log) if days else pd.DataFrame()
+    if not new.empty and not old.empty:
+        # columns other modules keep in this file (nba/lead.py's largest leads) carry over to the games fetched again
+        extra = [c for c in old.columns if c not in new.columns]
+        if extra:
+            new = new.merge(old[["event_id", *extra]], on="event_id", how="left")
     df = pd.concat([old, new], ignore_index=True) if not new.empty else old
     df = df.drop_duplicates("event_id", keep="last").sort_values(["date", "event_id"]).reset_index(drop=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)

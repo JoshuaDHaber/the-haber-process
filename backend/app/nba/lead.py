@@ -67,8 +67,9 @@ def add_leads(df: pd.DataFrame, log=print, path: str = blowout.HISTORY_CSV, limi
     log(f"  largest leads for {len(todo)} games...")
     with ThreadPoolExecutor(workers) as ex:
         leads = list(ex.map(_leads, todo.event_id))
-    df.loc[todo.index, "home_lead"] = [h for h, _ in leads]
-    df.loc[todo.index, "away_lead"] = [a for _, a in leads]
+    # a game ESPN has no stats for yet comes back (None, None): NaN, so it's asked again next run (pandas 3 won't take None)
+    df.loc[todo.index, "home_lead"] = np.array([h for h, _ in leads], dtype=float)
+    df.loc[todo.index, "away_lead"] = np.array([a for _, a in leads], dtype=float)
     df.to_csv(path, index=False)
     log(f"  {int(df.home_lead.notna().sum())} games with largest leads")
     return df
