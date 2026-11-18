@@ -26,7 +26,7 @@ from . import odds as nba_odds
 Log = Callable[[str], None]
 DROP = {"Out", "Doubtful", "Suspension"}   # statuses that keep a player off the board
 PROPS_WINDOW_HOURS = 20   # props are fetched for games tipping off within this long (books post them the day of)
-KEEP_RUNS = 12            # older NBA runs are deleted (three syncs a day would otherwise pile up)
+KEEP_RUNS = 24            # older NBA runs are deleted (three syncs a day): eight days, so a forgotten bet can be added late (bets.LATE_DAYS)
 BACKTEST_FROM = (10, 20)  # the walk-forward starts on this (month, day) of the previous season
 
 

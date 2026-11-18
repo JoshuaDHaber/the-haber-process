@@ -10,7 +10,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import auth, config, grading
@@ -23,6 +23,8 @@ router = APIRouter(prefix="/api/me", tags=["bets"])
 NBA_KINDS = {"pts", "reb", "ast", "threes", "pra", "pr", "pa", "stl", "blk", "dd", "tpl"}
 MAX_LEGS = 25   # FanDuel and DraftKings take up to 25 legs
 MAX_STAKE = 100_000
+# a bet the bettor forgot to record can still be added this many days after its first game starts; it's marked late
+LATE_DAYS = 7
 MAX_TAGS, TAG_LEN = 6, 24
 # a parlay leg whose own price the book didn't show (most only show the parlay's): bet_legs.odds can't be NULL in
 # databases created before this, and no American price is 0, so 0 means "not known"
@@ -219,28 +221,42 @@ def _game(db: Session, league: str, game_id: str, player_id: str, kind: str = ""
     moneyline, player_id is the team."""
     if kind == ML:
         return _team_game(db, league, game_id, player_id)
-    if league == "nfl":
-        run = db.scalar(select(Run).order_by(Run.id.desc()).limit(1))
-        row = run and db.scalar(select(Projection).where(Projection.run_id == run.id, Projection.game_id == game_id,
-                                                         Projection.player_id == player_id).limit(1))
+    run_t, proj_t = (Run, Projection) if league == "nfl" else (NbaRun, NbaProjection)
+    run = db.scalar(select(run_t).order_by(run_t.id.desc()).limit(1))
+    row = run and db.scalar(select(proj_t).where(proj_t.run_id == run.id, proj_t.game_id == game_id, proj_t.player_id == player_id).limit(1))
+    if not row:
+        # a game that has started drops off the board: the last run that had it says who played and when (a late bet)
+        recent = [r.id for r in _recent_runs(db, run_t, datetime.utcnow())]
+        row = recent and db.scalar(select(proj_t).where(proj_t.run_id.in_(recent), proj_t.game_id == game_id, proj_t.player_id == player_id)
+                                   .order_by(proj_t.run_id.desc()).limit(1))
         if not row:
             return None
-        return dict(name=row.name, team=row.team, opp=row.opp, gameday=row.gameday, kickoff=kickoff_utc(row.gameday, row.gametime))
-    run = db.scalar(select(NbaRun).order_by(NbaRun.id.desc()).limit(1))
-    row = run and db.scalar(select(NbaProjection).where(NbaProjection.run_id == run.id, NbaProjection.game_id == game_id,
-                                                        NbaProjection.player_id == player_id).limit(1))
-    if not row:
-        return None
-    start = next((g.get("start") for g in run.games or [] if g.get("game_id") == game_id), None)
-    ko = datetime.fromisoformat(start.replace("Z", "+00:00")).replace(tzinfo=None) if start else kickoff_utc(row.gameday, row.gametime)
-    return dict(name=row.name, team=row.team, opp=row.opp, gameday=row.gameday, kickoff=ko)
+        run = db.get(run_t, row.run_id)
+        if (ko := _kickoff(run, row)) and ko > datetime.utcnow():
+            return None   # still to start but gone from the latest board (ruled out, say): not on the board any more
+    return dict(name=row.name, team=row.team, opp=row.opp, gameday=row.gameday, kickoff=_kickoff(run, row))
+
+
+def _kickoff(run, row) -> Optional[datetime]:
+    """When a projection's game starts (UTC): the NBA run's own start time where it has one, else the schedule's date and time."""
+    start = next((g.get("start") for g in getattr(run, "games", None) or [] if g.get("game_id") == row.game_id), None)
+    return datetime.fromisoformat(start.replace("Z", "+00:00")).replace(tzinfo=None) if start else kickoff_utc(row.gameday, row.gametime)
+
+
+def _recent_runs(db: Session, run_t, now: datetime) -> list:
+    """The runs that could still have a game from the last LATE_DAYS days on them, newest first."""
+    return db.scalars(select(run_t).where(run_t.created_at >= now - timedelta(days=LATE_DAYS + 2)).order_by(run_t.id.desc())).all()
 
 
 def _team_game(db: Session, league: str, game_id: str, team: str) -> Optional[dict]:
     from .engine import odds as nfl_odds
     from .nba import odds as nba_odds
-    run = db.scalar(select(Run if league == "nfl" else NbaRun).order_by((Run if league == "nfl" else NbaRun).id.desc()).limit(1))
+    run_t = Run if league == "nfl" else NbaRun
+    run = db.scalar(select(run_t).order_by(run_t.id.desc()).limit(1))
     g = ((run.teams or {}) if run else {}).get(game_id)
+    if not g:   # started and off the board: the last run that had it (a late bet)
+        run = next((r for r in _recent_runs(db, run_t, datetime.utcnow()) if game_id in (r.teams or {})), None)
+        g = run and run.teams[game_id]
     if not g or team not in (g["home"], g["away"]):
         return None
     start = next((x.get("start") for x in getattr(run, "games", None) or [] if x.get("game_id") == game_id), None) if league == "nba" else None
@@ -272,7 +288,7 @@ def _out(bet: Bet, now: datetime) -> BetOut:
         to_pay=returned(bet, "won"), settled_by=bet.settled_by, notes=bet.notes, tags=bet.tags or [],
         description=bet.description, bonus=bool(bet.bonus),
         placed_at=bet.placed_at.isoformat(), settled_at=bet.settled_at.isoformat() if bet.settled_at else None,
-        started=min(leg.kickoff for leg in bet.legs) <= now, ev_close=bet_ev_close(bet),
+        started=min(leg.kickoff for leg in bet.legs) <= now, ev_close=bet_ev_close(bet), late=bool(bet.late),
         legs=[BetLegOut(id=leg.id, game_id=leg.game_id, gameday=leg.gameday, kickoff=leg.kickoff.isoformat(), player_id=leg.player_id,
                         name=leg.name, team=leg.team, opp=leg.opp, kind=leg.kind, side=leg.side, line=leg.line, odds=leg.odds,
                         alt=leg.alt, prob=leg.prob, ev=leg.ev, actual=leg.actual, result=leg.result,
@@ -328,7 +344,7 @@ def _view(db: Session, user: User, league, book, tag, months, now: datetime) -> 
 
 
 CSV_COLUMNS = ["bet_id", "placed_at", "league", "sportsbook", "type", "stake", "odds", "status", "payout", "profit", "settled_at",
-               "tags", "ev_at_close", "bonus_bet", "leg_player", "leg_team", "leg_opponent", "leg_game_date", "leg_market", "leg_side", "leg_line",
+               "tags", "ev_at_close", "bonus_bet", "added_late", "leg_player", "leg_team", "leg_opponent", "leg_game_date", "leg_market", "leg_side", "leg_line",
                "leg_odds", "leg_alt_line", "leg_result", "leg_actual", "leg_close_chance"]
 
 
@@ -348,7 +364,7 @@ def export_csv(league: Optional[str] = Query(None, pattern="^(nfl|nba|oth)$"), b
         head = [b.id, b.placed_at.isoformat(timespec="seconds"), b.league.upper(), b.book, b.kind, b.stake, b.odds, b.status,
                 b.payout if settled else "", round(b.payout - cost(b), 2) if settled else "",
                 b.settled_at.isoformat(timespec="seconds") if b.settled_at else "", "; ".join(b.tags or []),
-                "" if (e := bet_ev_close(b)) is None else e, "yes" if b.bonus else ""]
+                "" if (e := bet_ev_close(b)) is None else e, "yes" if b.bonus else "", "yes" if b.late else ""]
         for leg in b.legs:
             w.writerow([*head, leg.name, leg.team, leg.opp, leg.gameday, leg.kind, leg.side, leg.line, leg.odds or "", "yes" if leg.alt else "",
                         leg.result or "", "" if leg.actual is None else leg.actual, "" if leg.close_p is None else round(leg.close_p, 4)])
@@ -359,12 +375,19 @@ def export_csv(league: Optional[str] = Query(None, pattern="^(nfl|nba|oth)$"), b
 @router.get("/bet-players", response_model=list[BetPlayer])
 def bet_players(league: str = Query(..., pattern="^(nfl|nba)$"), q: str = Query("", max_length=60),
                 user: User = Depends(require_member), db: Session = Depends(auth.get_db)):
-    """Players whose game hasn't started, matching q, with their game and markets: for adding a prop placed elsewhere
-    (the same rule as the slip: only before kickoff, and only players on the board, so it can be graded)."""
+    """Players on the board matching q, with their game and markets, for adding a prop placed elsewhere (only players the
+    site projects, so it can be graded): games still to start, then ones that started in the last LATE_DAYS days, which
+    the bettor forgot to record (those bets are marked late)."""
     from .engine.search import rank_hits
     if not q.strip():
         return []
-    hits = rank_hits([dict(p, projected=True) for p in upcoming_players(db, league, datetime.utcnow())], q, 12)
+    now = datetime.utcnow()
+    hits = rank_hits([dict(p, projected=True) for p in upcoming_players(db, league, now) + recent_players(db, league, now)], q, 12)
+    # each player's games together, where the search ranked him: the next one first, then the ones played, latest first
+    first = {}
+    for i, h in enumerate(hits):
+        first.setdefault(h["player_id"], i)
+    hits.sort(key=lambda h: (first[h["player_id"]], h.get("started", False), (-1 if h.get("started") else 1) * datetime.fromisoformat(h["kickoff"]).timestamp()))
     return [BetPlayer(**{k: v for k, v in h.items() if k != "projected"}) for h in hits]
 
 
@@ -374,11 +397,9 @@ def upcoming_players(db: Session, league: str, now: datetime) -> list:
     run = db.scalar(select(run_t).order_by(run_t.id.desc()).limit(1))
     if not run:
         return []
-    starts = {g.get("game_id"): g.get("start") for g in (getattr(run, "games", None) or [])}
     players: dict = {}
     for r in db.scalars(select(proj_t).where(proj_t.run_id == run.id)):
-        start = starts.get(r.game_id)
-        ko = datetime.fromisoformat(start.replace("Z", "+00:00")).replace(tzinfo=None) if start else kickoff_utc(r.gameday, r.gametime)
+        ko = _kickoff(run, r)
         if not ko or ko <= now:
             continue
         p = players.setdefault((r.player_id, r.game_id), dict(player_id=r.player_id, name=r.name, pos=r.pos, team=r.team, opp=r.opp,
@@ -386,6 +407,52 @@ def upcoming_players(db: Session, league: str, now: datetime) -> list:
         if r.kind not in p["kinds"]:
             p["kinds"].append(r.kind)
     return list(players.values())
+
+
+def recent_players(db: Session, league: str, now: datetime) -> list:
+    """Every player in a game that started in the last LATE_DAYS days, as the last run with that game has him: one entry
+    per player and game, shaped like upcoming_players' and flagged started (a bet on it is added late)."""
+    run_t, proj_t = (Run, Projection) if league == "nfl" else (NbaRun, NbaProjection)
+    runs = {r.id: r for r in _recent_runs(db, run_t, now)}
+    if not runs:
+        return []
+    # the scan reads every recent run, and only a new run changes it: kept per league and newest run, filtered by time per call
+    newest = runs[max(runs)]
+    key = (league, newest.id, newest.created_at, len(runs))
+    if _recent_cache.get(league, (None,))[0] != key:
+        last = db.execute(select(proj_t.game_id, func.max(proj_t.run_id)).where(proj_t.run_id.in_(runs)).group_by(proj_t.game_id)).all()
+        players: dict = {}
+        for r in (db.scalars(select(proj_t).where(or_(*(and_(proj_t.run_id == rid, proj_t.game_id == gid) for gid, rid in last))))
+                  if last else []):
+            ko = _kickoff(runs[r.run_id], r)
+            if not ko:
+                continue
+            p = players.setdefault((r.player_id, r.game_id), dict(player_id=r.player_id, name=r.name, pos=r.pos, team=r.team, opp=r.opp,
+                                                                  game_id=r.game_id, kickoff=ko.isoformat(), kinds=[], started=True))
+            if r.kind not in p["kinds"]:
+                p["kinds"].append(r.kind)
+        _recent_cache[league] = (key, list(players.values()))
+    lo, hi = (now - timedelta(days=LATE_DAYS)).isoformat(), now.isoformat()
+    return [dict(p, kinds=list(p["kinds"])) for p in _recent_cache[league][1] if lo <= p["kickoff"] <= hi]
+
+
+_recent_cache: dict = {}   # league -> ((league, newest run's id and time, how many runs), every player in those runs' last games)
+
+
+def recent_teams(db: Session, league: str, now: datetime) -> list:
+    """Both teams of every game that started in the last LATE_DAYS days, shaped like upcoming_teams' entries and flagged started."""
+    out, seen = [], set()
+    for run in _recent_runs(db, Run if league == "nfl" else NbaRun, now):
+        for gid in (run.teams or {}):
+            if gid in seen:
+                continue
+            seen.add(gid)
+            for team in (run.teams[gid].get("home"), run.teams[gid].get("away")):
+                t = team and _team_game(db, league, gid, team)
+                if t and t["kickoff"] and now - timedelta(days=LATE_DAYS) <= t["kickoff"] <= now:
+                    out.append(dict(player_id=team, name=t["name"], pos="", team=team, opp=t["opp"], game_id=gid,
+                                    kickoff=t["kickoff"].isoformat(), kinds=[ML], started=True))
+    return out
 
 
 def upcoming_teams(db: Session, league: str, now: datetime) -> list:
@@ -404,7 +471,7 @@ def upcoming_teams(db: Session, league: str, now: datetime) -> list:
 
 def _track_custom(body: BetIn, user: User, db: Session, now: datetime) -> BetOut:
     """A bet the site can't grade (a spread, a total, another sport, a boost): what it was, when its event starts, the
-    book, odds and stake. Like every tracked bet it's recorded before its event starts; the bettor marks the result."""
+    book, odds and stake. The bettor marks the result. One whose event started in the last LATE_DAYS days is added late."""
     text = " ".join((body.description or "").split())
     if not 3 <= len(text) <= 200:
         raise HTTPException(422, "Describe the bet in a few words (up to 200 characters)")
@@ -413,15 +480,15 @@ def _track_custom(body: BetIn, user: User, db: Session, now: datetime) -> BetOut
         starts = starts.astimezone(timezone.utc).replace(tzinfo=None) if starts.tzinfo else starts
     except ValueError:
         raise HTTPException(422, "Give the date and time the event starts")
-    if starts <= now:
-        raise HTTPException(422, "That event has started, so this bet can't be tracked now")
+    if starts < now - timedelta(days=LATE_DAYS):
+        raise HTTPException(422, f"That started more than {LATE_DAYS} days ago, too long ago to add")
     if starts > now + timedelta(days=366):
         raise HTTPException(422, "That's more than a year away")
     if body.odds is None or not valid_odds(body.odds):
         raise HTTPException(422, "Odds look wrong: use American odds like -110 or +250")
     bet = Bet(user_id=user.id, league=body.league or "oth", book=body.book.strip()[:40] or "Other", kind=CUSTOM, stake=round(body.stake, 2),
               odds=body.odds, status="open", notes=(body.notes or "").strip()[:500] or None, tags=clean_tags(body.tags),
-              description=text, bonus=body.bonus, placed_at=now)
+              description=text, bonus=body.bonus, late=starts <= now, placed_at=now)
     bet.legs.append(BetLeg(game_id=CUSTOM, gameday=starts.date().isoformat(), kickoff=starts, player_id="", name=text[:80], team="",
                            opp="", kind=CUSTOM, side="", line=0.0, odds=body.odds))
     db.add(bet)
@@ -469,8 +536,8 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
         g = _game(db, league, leg.game_id, leg.player_id, leg.kind)
         if not g or not g["kickoff"]:
             raise HTTPException(422, "One of these props isn't on the board any more")
-        if g["kickoff"] <= now:
-            raise HTTPException(422, f"{g['name']}'s game has started, so this bet can't be tracked now")
+        if g["kickoff"] < now - timedelta(days=LATE_DAYS):
+            raise HTTPException(422, f"{g['name']}'s game was more than {LATE_DAYS} days ago, too long ago to add")
         games[leg.game_id] = g
         bet.legs.append(BetLeg(game_id=leg.game_id, gameday=g["gameday"], kickoff=g["kickoff"], player_id=leg.player_id, name=g["name"],
                                team=g["team"], opp=g["opp"], kind=leg.kind, side="Over" if leg.kind == ML else leg.side,
@@ -478,6 +545,7 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
                                alt=leg.alt and leg.kind != ML, prob=leg.prob, ev=leg.ev))
     # hand-marked legs ride on the parlay's first game (they're almost always the same game: a same-game parlay)
     first = min(games.values(), key=lambda g: g["kickoff"])
+    bet.late = first["kickoff"] <= now   # recorded after it started: the bettor may have known how it went
     for leg in by_hand:
         text = " ".join(leg.description.split())
         bet.legs.append(BetLeg(game_id=CUSTOM, gameday=first["gameday"], kickoff=first["kickoff"], player_id="", name=text[:80], team="",

@@ -947,7 +947,9 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .slip-tracked-actions { display: flex; gap: 16px; flex-wrap: wrap; }
 .slip-total .slip-bonus input { width: auto; padding: 0; margin: 0; accent-color: var(--acc); }
 .track-bonus { align-items: flex-start; margin: 4px 0 2px; } .track-bonus input { margin-top: 2px; flex: none; accent-color: var(--acc); }
-.bet-bonus { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--chip); color: var(--mut); }
+.bet-pill { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--chip); color: var(--mut); white-space: nowrap; }
+.add-results .bet-pill, .add-player .bet-pill { margin-left: 6px; }
+.add-late { font-size: 13px; margin: 4px 0 0; }
 
 .bets-views { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bets-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; } .bets-tags > .mut { margin-right: 2px; }

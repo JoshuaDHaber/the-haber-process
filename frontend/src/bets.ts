@@ -20,6 +20,8 @@ export interface TrackedBet {
   description: string | null;
   /** Placed with a sportsbook's bonus bet: its stake wasn't the bettor's money, so a win pays (and profits) only the winnings. */
   bonus: boolean;
+  /** Recorded after its first game had started (up to LATE_DAYS later): the bettor may have known how it went. */
+  late: boolean;
   placed_at: string; settled_at: string | null; started: boolean; legs: TrackedLeg[];
   /** The bet's price measured at the close (a parlay's legs multiplied); null until every leg has closed. */
   ev_close: number | null;
@@ -101,7 +103,11 @@ export function addTag(tags: string[], text: string): string[] {
 
 // ---------- bets placed elsewhere (My bets → Add a bet) ----------
 /** A player whose game hasn't started, with his game and the markets he's projected in (backend bets.bet_players). */
-export interface BetPlayer { player_id: string; name: string; pos: string; team: string; opp: string; game_id: string; kickoff: string; kinds: Kind[] }
+export interface BetPlayer { player_id: string; name: string; pos: string; team: string; opp: string; game_id: string; kickoff: string; kinds: Kind[];
+  /** The game has started (in the last LATE_DAYS days): a bet on it is added late. */
+  started?: boolean }
+/** How long after a game starts a forgotten bet on it can still be added (backend bets.LATE_DAYS); it's marked late. */
+export const LATE_DAYS = 7;
 export const findBetPlayers = (league: "nfl" | "nba", q: string) =>
   call<BetPlayer[]>(`bet-players?${new URLSearchParams({ league, q })}`);
 

@@ -82,7 +82,8 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
     <article className="card bet-card">
       <header className="bet-head">
         <span className="bet-book"><BookBadge book={bet.book} size={22} /><b>{bet.book}</b><span className="mut">{title} · {bet.league === "oth" ? "Other" : bet.league.toUpperCase()}</span>
-          {bet.bonus && <span className="bet-bonus" title="Placed with a bonus bet: not counted as money you staked">Bonus bet</span>}</span>
+          {bet.bonus && <span className="bet-pill" title="Placed with a bonus bet: not counted as money you staked">Bonus bet</span>}
+          {bet.late && <span className="bet-pill" title="Added after its game had started, so the result may have been known">Added late</span>}</span>
         <span className="bet-head-aside">
           <Status bet={bet} />
           <Menu label={<IconDots size={16} stroke={1.75} aria-hidden />} ariaLabel={`Actions for this ${title.toLowerCase()}`} caret={false} buttonClass="icon-btn">
