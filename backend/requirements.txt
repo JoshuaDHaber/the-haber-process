@@ -1,13 +1,15 @@
-pandas
-numpy
-scipy
-requests
-fastapi
-uvicorn[standard]
-sqlalchemy>=2
-pydantic>=2
-pytest
-httpx
-psycopg[binary]
-tzdata
-anthropic>=0.125
+# Pinned to what production runs (Python 3.12, see the Dockerfile): an unpinned pandas jumped to 3.x in prod while
+# laptops stayed on 2.x, and code that 2.x accepted failed there. Bump these on purpose, in a PR, so CI tests the change.
+pandas==3.1.1
+numpy==2.5.4
+scipy==1.18.1
+requests==2.34.2
+fastapi==0.163.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+pydantic==2.14.3
+pytest==9.2.0
+httpx==0.28.1
+psycopg[binary]==3.3.9
+tzdata==2026.6
+anthropic==2.8.0
