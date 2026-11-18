@@ -719,6 +719,8 @@ class BetIn(BaseModel):
     starts_at: Optional[str] = None  # when its event starts (ISO, UTC): it can only be tracked before then
     league: Optional[Literal["nfl", "nba", "oth"]] = None
     bonus: bool = False              # placed with a bonus bet: not the bettor's money, and a win pays only the profit
+    boost: Optional[int] = None      # a profit boost, in percent: the winnings are (1 + boost/100) x what the odds pay
+    no_sweat: Optional[float] = None # a no-sweat bet: the most the book refunds as a bonus bet if it loses (up to the stake)
 
 
 class BetPlayer(BaseModel):
@@ -741,6 +743,8 @@ class BetPatch(BaseModel):
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
     bonus: Optional[bool] = None
+    boost: Optional[int] = None      # 0 takes the boost off
+    no_sweat: Optional[float] = None # 0 takes the no-sweat refund off
     # settle by hand (the book settled differently), or "open" to hand it back to grading
     status: Optional[Literal["open", "won", "lost", "push", "void"]] = None
 
@@ -784,6 +788,9 @@ class BetOut(BaseModel):
     description: Optional[str] = None
     bonus: bool = False              # a bonus bet: profit = payout, and it adds nothing to what was staked
     late: bool = False               # added after its first game started
+    boost: Optional[int] = None      # a profit boost, in percent (to_pay and payout include it)
+    no_sweat: Optional[float] = None # a no-sweat bet's refund if it loses, as a bonus bet (at most the stake)
+    refund: float = 0.0              # what a lost no-sweat bet earned back in bonus bets
     placed_at: str
     settled_at: Optional[str] = None
     started: bool                    # its first game has kicked off
@@ -799,6 +806,7 @@ class BetSummary(BaseModel):
     open_stake: float
     staked: float                    # the bettor's own money on bets that won or lost (bonus bets left out)
     bonus_staked: float = 0.0        # bonus bets' stakes on bets that won or lost
+    refunds: float = 0.0             # bonus bets earned back from no-sweat bets that lost (not in profit until they're bet)
     profit: float
     roi: Optional[float] = None
     curve: list[tuple[str, float]]   # (settled_at, running profit), oldest first

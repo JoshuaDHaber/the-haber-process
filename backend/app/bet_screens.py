@@ -50,19 +50,22 @@ SYSTEM = (
     "\"Under 45.5\" is Under 45.5. Anytime and first touchdown scorer, double-double and triple-double legs are yes/no: side "
     "Over (Under for \"No\"), line 0.5. `text` is the leg as written on the slip, including the player's name.\n\n"
     "`odds` is the whole bet's American price (+1300). `stake` is the total wager; if part of it is bonus bets or a free bet, "
-    "put that part in `bonus_stake` too. `to_return` is the payout shown, whatever the book calls it."
+    "put that part in `bonus_stake` too. `to_return` is the payout shown, whatever the book calls it.\n\n"
+    "A profit boost (\"50% Profit Boost\", \"25% SGP boost\"): `boost` is its percent (50), and `odds` stays the price "
+    "before the boost (the one struck through, if both are shown). `no_sweat` is true when the slip says the stake comes "
+    "back as a bonus bet if it loses (\"No Sweat\", \"bet insurance\", \"Second Chance\")."
 )
 
 _num = {"type": ["number", "null"]}
 _str = {"type": ["string", "null"]}
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["sportsbook", "bet_type", "odds", "stake", "bonus_stake", "to_return", "event", "legs"],
+    "required": ["sportsbook", "bet_type", "odds", "stake", "bonus_stake", "to_return", "boost", "no_sweat", "event", "legs"],
     "properties": {
         "sportsbook": _str,
         "bet_type": {"type": "string", "enum": ["single", "parlay"]},
         "odds": {"type": ["integer", "null"]},
-        "stake": _num, "bonus_stake": _num, "to_return": _num,
+        "stake": _num, "bonus_stake": _num, "to_return": _num, "boost": _num, "no_sweat": {"type": "boolean"},
         "event": {"type": "object", "additionalProperties": False, "required": ["teams", "starts"],
                   "properties": {"teams": {"type": "array", "items": {"type": "string"}}, "starts": _str}},
         "legs": {"type": "array", "items": {
@@ -99,6 +102,8 @@ class ScreenDraft(BaseModel):
     stake: Optional[float] = None
     bonus_stake: Optional[float] = None
     to_return: Optional[float] = None
+    boost: Optional[int] = None       # a profit boost, in percent, on top of `odds`
+    no_sweat: bool = False            # the stake comes back as a bonus bet if it loses
     legs: list[ScreenLeg]
     notes: list[str]                  # what the bettor should check before saving
 
@@ -208,15 +213,22 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
     elif slip.get("bonus_stake"):
         notes.append(f"Includes ${slip['bonus_stake']:.2f} in bonus bets: the stake below is the whole wager, so the payout here is "
                      f"${slip['bonus_stake']:.2f} more than the slip's (a bonus bet's stake isn't paid back).")
-    if slip.get("boost"):
+    # a boost already in odds worked out from the payout stays a note; one on top of the slip's own price is set
+    boost = round(slip["boost"]) if slip.get("boost") and not slip.get("odds_from_return") and 1 <= slip["boost"] <= 500 else None
+    if slip.get("boost") and boost is None:
         notes.append(f"Includes a {slip['boost']:g}% boost: the odds here are worked out from what the slip says it returns.")
+    elif boost:
+        notes.append(f"Profit boost is set to {boost}%: the odds are the price before it.")
+    no_sweat = bool(slip.get("no_sweat")) and not slip.get("bonus_stake") and not boost
+    if no_sweat:
+        notes.append("No sweat is set: if it loses, My bets shows the stake coming back as a bonus bet.")
     if slip.get("odds") is None:
         notes.append("The slip didn't show the bet's odds: enter them before saving.")
     if slip.get("stake") is None:
         notes.append("The slip didn't show the stake: enter it before saving.")
     return ScreenDraft(book=slip.get("sportsbook"), league=max(set(league_votes), key=league_votes.count) if league_votes else None,
                        kind="parlay" if len(legs) > 1 else "single", odds=slip.get("odds"), stake=slip.get("stake"),
-                       bonus_stake=slip.get("bonus_stake"), to_return=slip.get("to_return"), legs=legs, notes=notes)
+                       bonus_stake=slip.get("bonus_stake"), to_return=slip.get("to_return"), boost=boost, no_sweat=no_sweat, legs=legs, notes=notes)
 
 
 @router.post("/bets/read-screenshot", response_model=ScreenDraft, dependencies=[Depends(auth.same_origin)])

@@ -299,6 +299,10 @@ class Bet(Base):
     bonus: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # recorded after its first game had started (up to bets.LATE_DAYS later): the bettor may have known how it went
     late: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # a profit boost, in percent (50 = the winnings are 1.5x what the odds pay): `odds` stays the price before the boost
+    boost: Mapped[int] = mapped_column(Integer, nullable=True)
+    # a no-sweat bet: the most the book refunds, as a bonus bet, if it loses (up to the stake)
+    no_sweat: Mapped[float] = mapped_column(Float, nullable=True)
     placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     settled_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     legs: Mapped[list["BetLeg"]] = relationship(back_populates="bet", cascade="all, delete-orphan", order_by="BetLeg.id")
@@ -534,6 +538,7 @@ def ensure_columns(eng) -> bool:
                                  ("bets", "tags", "JSON"), ("bets", "description", "VARCHAR(200)"),
                                  ("bets", "bonus", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "late", "BOOLEAN NOT NULL DEFAULT FALSE"),
+                                 ("bets", "boost", "INTEGER"), ("bets", "no_sweat", "FLOAT"),
                                  ("bet_legs", "close_p", "FLOAT"), ("bet_legs", "close_at", "TIMESTAMP"), ("bet_legs", "close_books", "INTEGER"),
                                  *((t, c, typ) for t in ("projections", "nba_projections")
                                    for c, typ in (("dvp", "FLOAT"), ("dvp_rank", "INTEGER"), ("dvp_n", "INTEGER"))),

@@ -20,6 +20,10 @@ export interface TrackedBet {
   description: string | null;
   /** Placed with a sportsbook's bonus bet: its stake wasn't the bettor's money, so a win pays (and profits) only the winnings. */
   bonus: boolean;
+  /** A profit boost, in percent: `odds` is the price before it, and `to_pay` and `payout` include it. */
+  boost: number | null;
+  /** A no-sweat bet: what the book refunds as a bonus bet if it loses (at most the stake), and what a lost one earned back. */
+  no_sweat: number | null; refund: number;
   /** Recorded after its first game had started (up to LATE_DAYS later): the bettor may have known how it went. */
   late: boolean;
   placed_at: string; settled_at: string | null; started: boolean; legs: TrackedLeg[];
@@ -30,6 +34,8 @@ export interface BetSummary {
   wins: number; losses: number; pushes: number; open: number; open_stake: number; staked: number; profit: number;
   /** Bonus bets' stakes on settled bets: not in `staked` (they weren't the bettor's money), though their winnings are profit. */
   bonus_staked: number;
+  /** Bonus bets earned back from no-sweat bets that lost: not profit until they're bet and win. */
+  refunds: number;
   roi: number | null; curve: [string, number][];
   /** Bets with a closing price, the share priced better than the close, and their average EV at the close. */
   clv_n: number; beat_close: number | null; ev_close: number | null;
@@ -64,14 +70,14 @@ const legBody = (l: Leg) => ({ game_id: l.gameId, player_id: l.kind === "ml" ? l
   alt: l.alt, prob: l.prob, ev: l.ev });
 
 /** Track a slip group as one parlay (with the price recorded at the book), or each leg as a single at `stake`. */
-export async function trackBets(book: string, legs: Leg[], asParlay: boolean, stake: number, parlayOdds: number, tags: string[] = [], bonus = false) {
-  if (asParlay) return [await call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({ book, kind: "parlay", stake, odds: parlayOdds, tags, bonus, legs: legs.map(legBody) }) })];
+export async function trackBets(book: string, legs: Leg[], asParlay: boolean, stake: number, parlayOdds: number, tags: string[] = [], promo: PromoBody = { bonus: false }) {
+  if (asParlay) return [await call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({ book, kind: "parlay", stake, odds: parlayOdds, tags, ...promo, legs: legs.map(legBody) }) })];
   const out: TrackedBet[] = [];
-  for (const l of legs) out.push(await call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({ book, kind: "single", stake, tags, bonus, legs: [legBody(l)] }) }));
+  for (const l of legs) out.push(await call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({ book, kind: "single", stake, tags, ...promo, legs: [legBody(l)] }) }));
   return out;
 }
 
-export const editBet = (id: number, patch: { stake?: number; odds?: number; notes?: string; status?: BetStatus; tags?: string[]; bonus?: boolean }) =>
+export const editBet = (id: number, patch: { stake?: number; odds?: number; notes?: string; status?: BetStatus; tags?: string[] } & Partial<PromoBody>) =>
   call<TrackedBet>(`bets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const deleteBet = (id: number) => call<void>(`bets/${id}`, { method: "DELETE" });
 
@@ -88,6 +94,39 @@ export function parseOdds(text: string): number | null {
 
 /** If it wins, what the book pays back: the stake and winnings, or for a bonus bet only the winnings (its stake isn't returned). */
 export const winReturn = (stake: number, winnings: number, bonus: boolean) => (bonus ? winnings : stake + winnings);
+
+// ---------- promos: one a bet ----------
+/** A bonus bet (free bet), a profit boost on the winnings, or a no-sweat bet (the stake back as a bonus bet if it loses). */
+export type PromoKind = "none" | "bonus" | "boost" | "no_sweat";
+/** The promo as a form holds it: the boost's percent and the no-sweat refund as typed (a blank refund is the whole stake). */
+export interface Promo { kind: PromoKind; boost: string; refund: string }
+export const NO_PROMO: Promo = { kind: "none", boost: "", refund: "" };
+/** What a profit boost runs to (backend bets.MAX_BOOST). */
+export const MAX_BOOST = 500;
+export const promoOf = (b: Pick<TrackedBet, "bonus" | "boost" | "no_sweat" | "stake">): Promo => ({
+  kind: b.bonus ? "bonus" : b.boost ? "boost" : b.no_sweat ? "no_sweat" : "none",
+  boost: b.boost ? String(b.boost) : "", refund: b.no_sweat && b.no_sweat < b.stake ? String(b.no_sweat) : "" });
+/** The boost typed, as a whole percent from 1 to MAX_BOOST; null if it isn't one. */
+export function boostPct(p: Promo): number | null {
+  const n = Number(p.boost.trim().replace(/%$/, ""));
+  return p.kind === "boost" && Number.isInteger(n) && n >= 1 && n <= MAX_BOOST ? n : null;
+}
+/** The no-sweat refund typed, or the stake when it's blank; null if it isn't a dollar amount. */
+export function refundOf(p: Promo, stake: number): number | null {
+  if (p.kind !== "no_sweat") return null;
+  if (!p.refund.trim()) return stake > 0 ? stake : null;
+  const n = Number(p.refund.replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, stake || n) : null;
+}
+/** The form's promo is complete: a boost needs its percent, a no-sweat refund a dollar amount (or blank). */
+export const promoReady = (p: Promo, stake: number) =>
+  p.kind === "boost" ? boostPct(p) != null : p.kind === "no_sweat" ? !p.refund.trim() || refundOf(p, stake) != null : true;
+/** The promo as the server takes it: every field, so switching promos takes the old one off (0 is none). */
+export interface PromoBody { bonus: boolean; boost?: number; no_sweat?: number }
+export const promoBody = (p: Promo, stake: number): PromoBody =>
+  ({ bonus: p.kind === "bonus", boost: boostPct(p) ?? 0, no_sweat: refundOf(p, stake) ?? 0 });
+/** If it wins, what the book pays back with the promo: a boost multiplies the winnings, a bonus bet's stake isn't returned. */
+export const promoReturn = (stake: number, winnings: number, p: Promo) => winReturn(stake, winnings * (1 + (boostPct(p) ?? 0) / 100), p.kind === "bonus");
 /** What a bet cost the bettor: nothing for a bonus bet. */
 export const costOf = (b: Pick<TrackedBet, "stake" | "bonus">) => (b.bonus ? 0 : b.stake);
 
@@ -118,9 +157,9 @@ export type ManualLeg =
   | { custom: true; text: string; odds: number | null };
 /** A prop bet placed elsewhere: one leg is a single, more a parlay at `parlayOdds`. Graded like any tracked bet (a parlay's
  *  hand-marked legs wait for the bettor). */
-export const addPropBet = (book: string, legs: ManualLeg[], stake: number, parlayOdds: number, tags: string[], bonus = false) =>
+export const addPropBet = (book: string, legs: ManualLeg[], stake: number, parlayOdds: number, tags: string[], promo: PromoBody = { bonus: false }) =>
   call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({
-    book, stake, tags, bonus, kind: legs.length > 1 ? "parlay" : "single", odds: legs.length > 1 ? parlayOdds : undefined,
+    book, stake, tags, ...promo, kind: legs.length > 1 ? "parlay" : "single", odds: legs.length > 1 ? parlayOdds : undefined,
     legs: legs.map((l) => (l.custom ? { kind: "custom", description: l.text, odds: l.odds }
       : { game_id: l.player.game_id, player_id: l.player.player_id, kind: l.kind, side: l.side, line: l.line, odds: l.odds })),
   }) });
@@ -130,6 +169,8 @@ export interface ScreenLeg { graded: boolean; player: BetPlayer | null; kind: Ki
 export interface ScreenDraft {
   book: string | null; league: "nfl" | "nba" | null; kind: "single" | "parlay"; odds: number | null; stake: number | null;
   bonus_stake: number | null; to_return: number | null; legs: ScreenLeg[]; notes: string[];
+  /** A profit boost on top of `odds`, and whether the slip is a no-sweat bet (only the Claude reader sees these). */
+  boost?: number | null; no_sweat?: boolean;
 }
 /** A draft bet from a screenshot (a data URL), to check in the Add a bet sheet; nothing is saved. */
 export const readScreenshot = (image: string) => call<ScreenDraft>("bets/read-screenshot", { method: "POST", body: JSON.stringify({ image }) });
@@ -198,9 +239,9 @@ export async function screenshotDataUrl(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 /** Anything the site can't grade (a spread, a total, another sport, a boost), before its event starts; marked by hand. */
-export const addCustomBet = (b: { book: string; description: string; startsAt: string; league: "nfl" | "nba" | "oth"; odds: number; stake: number; tags: string[]; bonus?: boolean }) =>
+export const addCustomBet = (b: { book: string; description: string; startsAt: string; league: "nfl" | "nba" | "oth"; odds: number; stake: number; tags: string[]; promo?: PromoBody }) =>
   call<TrackedBet>("bets", { method: "POST", body: JSON.stringify({ kind: "custom", book: b.book, description: b.description, starts_at: b.startsAt,
-    league: b.league, odds: b.odds, stake: b.stake, tags: b.tags, bonus: !!b.bonus }) });
+    league: b.league, odds: b.odds, stake: b.stake, tags: b.tags, ...(b.promo ?? { bonus: false }) }) });
 
 /** Sportsbooks to suggest when typing one in; the bettor can type any other. */
 export const COMMON_BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "Fanatics", "ESPN BET", "BetRivers", "Hard Rock", "bet365", "PrizePicks", "Underdog"];

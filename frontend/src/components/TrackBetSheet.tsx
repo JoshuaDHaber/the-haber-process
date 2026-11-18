@@ -2,11 +2,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../auth";
-import { legLeague, money, myBets, parseOdds, trackBets, winReturn } from "../bets";
+import { legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, trackBets } from "../bets";
 import { namesItself, KIND_SHORT, americanOdds } from "../format";
 import { leaguePath, goToPath } from "../route";
 import { parlay, toWin, type Leg } from "../slip";
 import BookBadge from "./BookBadge";
+import PromoFields from "./PromoFields";
 import Sheet from "./Sheet";
 import SidePill from "./SidePill";
 import TagInput from "./TagInput";
@@ -27,7 +28,8 @@ export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: sli
   const [problem, setProblem] = useState("");
   const [done, setDone] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
-  const [bonus, setBonus] = useState(slipBonus);
+  const [promo, setPromo] = useState(slipBonus ? { ...NO_PROMO, kind: "bonus" as const } : NO_PROMO);
+  const bonus = promo.kind === "bonus";
   // the tags used before, offered as one-tap suggestions (the same query My bets opens with)
   const ready = !!auth?.user?.age_confirmed;
   const known = useQuery({ queryKey: ["my-bets", auth?.user?.email, {}], queryFn: () => myBets({}), enabled: ready, staleTime: 60_000 });
@@ -35,16 +37,18 @@ export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: sli
   const stakeN = Number(stake.replace(/[$,\s]/g, ""));
   const stakeOk = Number.isFinite(stakeN) && stakeN > 0;
   const oddsN = asParlay ? parseOdds(odds) : 0;
-  const pays = !stakeOk ? null : asParlay ? (oddsN ? winReturn(stakeN, toWin(oddsN, stakeN), bonus) : null) : null;
+  const promoOk = promoReady(promo, stakeN);
+  const pays = !stakeOk ? null : asParlay ? (oddsN ? promoReturn(stakeN, toWin(oddsN, stakeN), promo) : null) : null;
   const league = legLeague(legs[0]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!auth?.user) { openSignIn(); return; }
-    if (!stakeOk || (asParlay && !oddsN)) return;
+    if (!stakeOk || (asParlay && !oddsN) || !promoOk) return;
     setBusy(true); setProblem("");
     try {
-      const saved = await trackBets(book, legs, asParlay, Math.round(stakeN * 100) / 100, oddsN ?? 0, tags, bonus);
+      const s = Math.round(stakeN * 100) / 100;
+      const saved = await trackBets(book, legs, asParlay, s, oddsN ?? 0, tags, promoBody(promo, s));
       qc.invalidateQueries({ queryKey: ["my-bets"] });
       setDone(saved.length);
     } catch (err) { setProblem((err as Error).message); }
@@ -90,19 +94,17 @@ export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: sli
           </label>
         )}
       </div>
-      <label className="check track-bonus">
-        <input type="checkbox" checked={bonus} onChange={(e) => setBonus(e.target.checked)} />
-        <span>Bonus bet <span className="mut">(a free bet from {book}: not counted as money you staked, and a win pays only the winnings)</span></span>
-      </label>
+      <PromoFields promo={promo} onChange={setPromo} stake={stakeOk ? stakeN : 0} book={book} />
       <label className="auth-label" htmlFor="track-tags">Tags <span className="mut">(optional, to sort My bets)</span></label>
       <TagInput id="track-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
-      <p className="mut track-pays">
-        {asParlay ? (pays != null ? <>Pays <b>{money(pays)}</b> if every leg wins</> : !oddsN ? "Enter the price as American odds, like +264" : "Enter a stake")
+      <p className="mut track-pays" aria-live="polite">
+        {!promoOk ? (promo.kind === "boost" ? "Enter the boost, like 50%" : "Enter the refund in dollars")
+          : asParlay ? (pays != null ? <>Pays <b>{money(pays)}</b> if every leg wins</> : !oddsN ? "Enter the price as American odds, like +264" : "Enter a stake")
           : legs.length > 1 ? (stakeOk ? <>{legs.length} bets, <b>{money(stakeN * legs.length)}</b> in {bonus ? "bonus bets" : "all"}, each at its own price</> : "Enter a stake")
-          : stakeOk ? <>Pays <b>{money(winReturn(stakeN, toWin(legs[0].odds, stakeN), bonus))}</b> if it wins</> : "Enter a stake"}
+          : stakeOk ? <>Pays <b>{money(promoReturn(stakeN, toWin(legs[0].odds, stakeN), promo))}</b> if it wins</> : "Enter a stake"}
       </p>
       {problem && <p className="err auth-problem" role="alert">{problem}</p>}
-      <button className="primary" disabled={busy || (auth?.user != null && (!stakeOk || (asParlay && !oddsN)))}>
+      <button className="primary" disabled={busy || (auth?.user != null && (!stakeOk || (asParlay && !oddsN) || !promoOk))}>
         {!auth?.user ? "Sign in to track" : busy ? "Saving…" : legs.length > 1 && !asParlay ? `Track ${legs.length} bets` : "Track bet"}
       </button>
     </form>
