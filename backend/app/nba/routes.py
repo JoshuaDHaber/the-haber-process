@@ -20,9 +20,9 @@ from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, lad
 from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
-from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, LadderOut,
-                       MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
-from . import espn, grading, lead, model
+from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
+                       LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
+from . import espn, grading, king, lead, model
 from . import odds as nba_odds
 
 NbaKind = Literal["pts", "reb", "ast", "threes", "pra", "pr", "pa", "stl", "blk", "dd", "tpl"]
@@ -261,6 +261,35 @@ def build_moneylines(db: Session, run: Optional[NbaRun], market_weight: Optional
     w = weight_for(market_fit.market_weights(db, "nba"), "ml", None) if market_weight is None else market_weight
     return mlm.price(games, lines, w, books.pricing_books(book, lines.get("book", []), books.hide_offshore(db)), names=nba_odds.TEAM_NAMES,
                      min_market_weight=model.ML_MIN_MARKET_WEIGHT, book_weights=market_fit.book_weights(db, "nba"))
+
+
+_king_cache: dict = {}
+
+
+@router.get("/promos/king", response_model=KingBoard)
+def king_of_the_court(gameday: Optional[str] = None, book: Optional[str] = None, db: Session = Depends(get_db)):
+    """King of the Court: each player's chance to have the most PRA on one day's slate (the first day still to play
+    when gameday is left out), with his PRA over at the board's book."""
+    run = latest_run(db)
+    live = _upcoming(run) if run else []
+    days = sorted({g["gameday"] for g in live})
+    day = gameday if gameday in days else (days[0] if days else None)
+    if not day:
+        return KingBoard()
+    ids = frozenset(g["game_id"] for g in live if g["gameday"] == day)
+    key = (run.id, day, ids)
+    if key not in _king_cache:   # the draws only change with the run and the games still to tip off
+        if len(_king_cache) > 20:
+            _king_cache.clear()
+        proj = pd.DataFrame([dict(player_id=p.player_id, name=p.name, pos=p.pos, team=p.team, opp=p.opp, home=p.home, game_id=p.game_id,
+                                  gameday=p.gameday, gametime=p.gametime, status=p.status, mu=p.mu, sd=p.sd, dvp_rank=p.dvp_rank, dvp_n=p.dvp_n)
+                             for p in db.scalars(select(NbaProjection).where(NbaProjection.run_id == run.id, NbaProjection.kind == "pra",
+                                                                             NbaProjection.game_id.in_(ids)))])
+        _king_cache[key] = (proj, king.board(proj, (run.variance or {}).get("pra"), seed=run.id))
+    proj, rows = _king_cache[key]
+    picks = all_picks(db, run, None, book)
+    over = {} if picks.empty else {r["player_id"]: r for r in _records(picks[(picks.kind == "pra") & (picks.side == "Over")])}
+    return KingBoard(gameday=day, games=len(ids), sims=king.SIMS, players=[dict(r, pick=over.get(r["player_id"])) for r in rows])
 
 
 @router.get("/moneylines/{game_id}/{team}/lines", response_model=LadderOut)

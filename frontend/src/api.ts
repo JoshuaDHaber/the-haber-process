@@ -176,6 +176,13 @@ export interface MoneylineGame {
   game_id: string; label: string; gameday: string; gametime: string; margin: number; spread: number | null; total?: number | null; sides: MoneylineSide[];
   blowout?: { games: number; chances: BlowoutChance[] } | null;
 }
+/** NBA King of the Court: a player's chance to have the most points + rebounds + assists on one day's slate (ties count), and
+ *  his PRA over at the board's book when one is posted. A sleeper sits outside the top projections with a soft matchup and a real chance. */
+export interface KingRow {
+  player_id: string; name: string; pos: string; team: string; opp: string; home: boolean; game_id: string; gameday: string; gametime: string; status: string;
+  mu: number; sd: number; proj_rank: number; p_top: number; p_top3: number; dvp_rank: number | null; dvp_n: number | null; sleeper: boolean; pick: Pick | null;
+}
+export interface KingBoard { gameday: string | null; games: number; sims: number; players: KingRow[] }
 /** This week's injury report per team (both sides of the ball) plus reserve lists. Times are UTC without a zone suffix. */
 export interface InjuredPlayer {
   player_id: string; name: string; pos: string; team: string; side: "off" | "def" | "st";
@@ -295,6 +302,7 @@ export const api = {
   nbaProjections: () => get<Projection[]>("nba/projections"),
   searchPlayers: (q: string) => get<PlayerHit[]>(lg("player-search"), { q }),
   player: (id: string, marketWeight: number | null) => get<PlayerDetail>(lg(`players/${id}`), { market_weight: marketWeight ?? undefined }),
+  king: (gameday: string | undefined, book: string) => get<KingBoard>("nba/promos/king", { gameday, book: bookParam(book) }),
   moneylines: (book: string, marketWeight: number | null, leadBy?: number) =>
     get<MoneylineGame[]>(lg("moneylines"), { book: bookParam(book), market_weight: marketWeight ?? undefined, lead_by: leadBy }),
   /** Teams on a winning streak of the league on screen, with their moneyline at `book` (best price anywhere for "all"). */

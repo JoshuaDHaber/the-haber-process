@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { api, type MoneylineGame, type MoneylineSide } from "../api";
 import { americanOdds, kickoff, matchup, pct, signedPct } from "../format";
 import { sidePick } from "../moneyline";
@@ -29,7 +29,7 @@ function SeasonRecord({ s }: { s: MoneylineSide }) {
 
 /** Every side on the slate priced for an early-win token: the chance it goes up by the lead, the chance the bet cashes (up by
  *  the lead or a win) and that bet's EV at the board's book, best first. */
-export default function TokenBoard({ book, marketWeight, gameIds }: { book: string; marketWeight: number | null; gameIds: string[] }) {
+export default function TokenBoard({ book, marketWeight, gameIds, pills }: { book: string; marketWeight: number | null; gameIds: string[]; pills: ReactNode }) {
   const [lead, setLead] = useState<number>(DEFAULT_LEAD);
   const q = useQuery({ queryKey: ["moneylines", book, marketWeight, lead], queryFn: () => api.moneylines(book, marketWeight, lead), placeholderData: (p) => p });
   const rows = useMemo<Row[]>(() => (q.data ?? []).filter((g) => gameIds.includes(g.game_id)).flatMap((g) => g.sides
@@ -40,6 +40,7 @@ export default function TokenBoard({ book, marketWeight, gameIds }: { book: stri
   return (
     <>
       <div className="hot-bar">
+        {pills}
         <div className="seg small" role="group" aria-label="Lead the token needs">
           <span className="mut seg-label">Pays once up by</span>
           {LEADS.map((n) => <button key={n} className={lead === n ? "on" : ""} aria-pressed={lead === n} onClick={() => setLead(n)}>{n}</button>)}

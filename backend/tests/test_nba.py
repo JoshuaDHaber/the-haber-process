@@ -296,6 +296,25 @@ def test_nba_picks_moneylines_and_projections(nba_client):
     assert all(g["game_id"] != GID and g["blowout"] is None for g in nba_client.get("/api/moneylines").json())
 
 
+def test_nba_king_of_the_court_ranks_the_slate_by_chance_to_lead_in_pra(nba_client):
+    with SessionLocal() as s:
+        run = s.query(NbaRun).one()
+        for pid, name, mu, rank in (("p1", "Star Guard", 44.0, 3), ("p2", "Big Man", 38.0, 2), ("p3", "Bench Wing", 18.0, 1)):
+            s.add(NbaProjection(run_id=run.id, player_id=pid, name=name, pos="G", team="DET", opp="BOS", home=True, kind="pra", mu=mu, sd=7.0,
+                                vol=34.0, eff=1.0, spread=1.5, status="", game_id=GID, gameday="2026-10-20", gametime="19:30", last5=[mu] * 5,
+                                wx=1.0, teammate_out="", dvp_rank=rank, dvp_n=30))
+        s.add(NbaOddsLine(fetched_at=datetime.utcnow(), player="Star Guard", market="pra", line=42.5, over_odds=-115, under_odds=-105,
+                          book="FanDuel", game_id=GID))
+        s.commit()
+    js = nba_client.get("/api/nba/promos/king").json()
+    assert (js["gameday"], js["games"], js["sims"]) == ("2026-10-20", 1, 20000)
+    star, big = js["players"][:2]
+    assert (star["name"], star["proj_rank"], big["name"]) == ("Star Guard", 1, "Big Man") and star["p_top"] > big["p_top"] > 0
+    assert star["pick"]["line"] == 42.5 and star["pick"]["side"] == "Over" and big["pick"] is None
+    assert not any(p["sleeper"] for p in js["players"])   # two players can't be outside the top five
+    assert nba_client.get("/api/nba/promos/king", params={"gameday": "1999-01-01"}).json()["gameday"] == "2026-10-20"
+
+
 def test_nba_games_that_tipped_off_drop_off_the_board(nba_client):
     with SessionLocal() as s:
         run = s.query(NbaRun).one()
