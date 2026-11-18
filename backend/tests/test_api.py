@@ -15,7 +15,7 @@ def client():
                   variance={"rush": [1.0, 0.1]}, excluded=["Hurt Guy (Out)"],
                   teams={"2026_04_BBB_AAA": dict(home="AAA", away="BBB", gameday="2026-10-04", gametime="13:00", margin=4.0,
                                                  p_home=0.6, home_rating=2.0, away_rating=-0.5, spread=3.5)})
-        for i, (name, mu) in enumerate([("Alpha Back", 90.0), ("Beta Back", 40.0)]):
+        for i, (name, mu) in enumerate([("Alpha Back", 75.0), ("Beta Back", 40.0)]):
             run.projections.append(Projection(
                 player_id=f"p{i}", name=name, pos="RB", team="AAA", opp="BBB", home=True, kind="rush", mu=mu, sd=30.0,
                 vol=15.0, eff=4.5, spread=3.0, status="", game_id="2026_04_BBB_AAA", gameday="2026-10-04",

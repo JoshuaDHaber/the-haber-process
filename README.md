@@ -190,7 +190,8 @@ The chance of beating a line comes from the backtest's own errors, not an assume
 
 Two guards keep bad data from topping the board:
 - Quotes far from the multi-book consensus line (stale or alternate lines) are ignored.
-- Plays where model and market disagree by more than ~40-67% are hidden by default and tagged "large gap". These are usually model blind spots (a teammate's injury, a role change), not value.
+- Plays where model and market disagree by more than ~40-67% are hidden by default and tagged "large gap" (for rushing, receiving, rush + receiving and passing yards, a projection more than 25% from the consensus line: in the graded 2026 picks, the further those projections sat from the line, the more often the line won). These are usually model blind spots (a teammate's injury, a role change), not value.
+- A book that posts several lines in the main market (Bovada lists a ladder 10 yards apart) counts only its line nearest the consensus there; the rest are alternates, for the ladder only. They had been slipping onto the board at long plus-money prices and going 34%.
 
 ### Reading the market
 

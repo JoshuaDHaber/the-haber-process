@@ -21,6 +21,12 @@ PICK_COLUMNS = [
 # a quote this far from the consensus line (or 30% of it) is an alternate or stale line; receptions are counted in catches,
 # passing TDs in touchdowns (lines step 0.5 / 1.5 / 2.5, so a whole TD off the consensus is another line)
 # NBA from pts on (threes, steals and blocks step 0.5 / 1.5 / 2.5, like passing TDs)
+# yardage markets flag a projection more than this far from the consensus line (others: outside 0.6-1.67x). Graded weeks
+# 6-10 of 2026: the further rushing, rush + receiving and passing projections sat from the line, the more often the
+# line won (rush Overs the model gave 70%+ hit 12%), and the model's chance alone scored worse than a coin flip.
+# Flagging past 25% took the near-line board from -3.6% to -0.7% ROI. Receptions keep the wide band: there the model's
+# disagreement held up (its 70%+ Overs hit 82%).
+YARDS_GAP = {"rush": 0.25, "rec": 0.25, "rr": 0.25, "pass": 0.25}
 STALE_MIN_GAP = {"recs": 1.5, "ptd": 0.9, "pts": 4.0, "reb": 2.0, "ast": 2.0, "threes": 0.9, "pra": 6.0, "pr": 5.0, "pa": 5.0,
                  "stl": 0.9, "blk": 0.9}
 
@@ -68,9 +74,10 @@ def hours_before(lines: pd.DataFrame, proj: pd.DataFrame) -> pd.Series:
 def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 0.35, only_book: str = None,
                 dists: dict = None, best_only: bool = True, book_weights: dict = None, fitted: dict = None,
                 max_ev: float = None) -> pd.DataFrame:
-    """All priced Over/Under candidates. flagged (hidden by default) = model and market disagree by >40-67%, usually a
-    model blind spot; `flag` names the reason ("large gap"), or "long shot" (LONG_SHOT) or "edge too big" (EV over
-    max_ev, when given). teammate_out is context only: a same-position rotation
+    """All priced Over/Under candidates. flagged (hidden by default) = model and market disagree by >40-67% (>25% for
+    rushing, receiving, rush + receiving and passing yards: YARDS_GAP), usually a model blind spot; `flag` names the
+    reason ("large gap"), or "long shot" (LONG_SHOT) or "edge too big" (EV over max_ev, when given). teammate_out is
+    context only: a same-position rotation
     receiver in his first game out (redistribute.teammates_out). It isn't a flag: those receivers average a few yards
     over projection, but from a few big games; they beat it no more often than anyone (42.6% vs 42.7%), so their
     Unders hit as often as any.
@@ -102,6 +109,7 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
             return pd.DataFrame(columns=PICK_COLUMNS)
     pm = {(r.key, r.kind): r for r in proj.itertuples()}
 
+    lines = mkt.main_quotes(lines)   # a book's extra lines in the main market are alternates: never priced here
     lines = lines.assign(hours=hours_before(lines, proj).to_numpy())
     keep = book_set(only_book)
     out = []
@@ -182,7 +190,9 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
             # passing TDs (and NBA threes, steals, blocks) sit at 0.5 / 1.5 / 2.5, where projection-over-line ratios swing wildly, so like anytime TD they
             # compare chances instead
             by_chance = is_td or r.market in ("ptd", "threes", "stl", "blk")
-            gap = (not (0.6 <= p_side / max(mk, 1e-6) <= 1.67)) if by_chance else not (0.6 <= p.mu / max(c.line, 0.5) <= 1.67)
+            ratio = p.mu / max(c.line, 0.5)
+            gap = (not (0.6 <= p_side / max(mk, 1e-6) <= 1.67)) if by_chance else \
+                abs(ratio - 1) > YARDS_GAP[r.market] if r.market in YARDS_GAP else not (0.6 <= ratio <= 1.67)
             out_ = getattr(p, "teammate_out", "") or ""
             out_ = "" if pd.isna(out_) else str(out_)
             long_shot = side == "Over" and odd > LONG_SHOT.get(r.market, float("inf"))

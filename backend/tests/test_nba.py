@@ -427,6 +427,20 @@ def test_nba_ladder_prices_from_the_calibrated_projection(nba_client):
                      if p["side"] == "Over")
         rung = _main_rung(nba_client)
         assert rung["over"]["p_model"] == pytest.approx(board["p_model"], abs=2e-3)
+        # a second book posting a ladder in the main market moves neither (one line per book: market.main_quotes)
+        with SessionLocal() as s:
+            t = s.query(NbaOddsLine).filter_by(market="pts").first().fetched_at
+            s.add_all([NbaOddsLine(fetched_at=t, player="Star Guard", market="pts", line=x, over_odds=o, under_odds=u, book="Bovada", game_id=GID)
+                       for x, o, u in ((14.5, -500, 350), (19.5, -300, 220), (24.5, -110, -110))])   # all of it below: the old median moved to 22
+            s.commit()
+        board2 = next(p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
+                      if p["side"] == "Over" and p["line"] == 24.5)
+        rung2 = next(q for q in nba_client.get("/api/nba/players/p1/lines", params={"kind": "pts"}).json()["quotes"]
+                     if q["line"] == 24.5 and q["book"] == "FanDuel")
+        assert rung2["over"]["p_model"] == pytest.approx(board2["p_model"], abs=2e-3)
+        with SessionLocal() as s:
+            s.query(NbaOddsLine).filter_by(book="Bovada").delete()
+            s.commit()
         with SessionLocal() as s:
             s.query(Setting).filter_by(key="market_fit_nba").delete()
             s.commit()

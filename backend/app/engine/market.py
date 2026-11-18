@@ -93,12 +93,38 @@ def consensus(lines: pd.DataFrame, p_over: Optional[Callable] = None, weights: O
     return pd.DataFrame({"line": g.cline.first(), "nv_o": (g.wnv.sum() / wsum).where(wsum > 0), "books": g.book.nunique()})[cols]
 
 
+def main_quotes(lines: pd.DataFrame) -> pd.DataFrame:
+    """One quote per book per (key, market) (and per fetch, where lines has fetched_at): a book that posts several
+    lines in the main market (Bovada lists a ladder 10 yards apart, 130.5 to 190.5) keeps only the one nearest the
+    consensus, and the rest are its alternates. The consensus here gives each book one vote (the median of each book's
+    median line), so a seven-line ladder can't drag it. Ties go to the more evenly priced quote.
+
+    Graded weeks 6-10 of 2026: Bovada's extra lines made up most of its quotes that sat 10-30% off the consensus, slipped
+    under the stale-line gap, and went 34% at a median +165 on the board (-10% ROI). A book's lone quote is never dropped."""
+    if lines.empty:
+        return lines
+    by = ["key", "market", "book"] + (["fetched_at"] if "fetched_at" in lines else [])
+    if not lines.duplicated(by).any():
+        return lines
+    groups = ["key", "market"] + (["fetched_at"] if "fetched_at" in lines else [])
+    book_med = lines.groupby(by, dropna=False).line.median().rename("_bm").reset_index()
+    cons = book_med.groupby(groups, dropna=False)._bm.median().rename("_cons").reset_index()
+    d = lines[groups + ["book", "line", "over_odds", "under_odds"]].assign(_i=np.arange(len(lines)))
+    d = d.merge(cons, on=groups, how="left")
+    d["_dist"] = (d.line - d._cons).abs()
+    io, iu = np.asarray(odds.implied(d.over_odds), float), np.asarray(odds.implied(d.under_odds), float)
+    d["_skew"] = np.nan_to_num(np.abs(io - iu), nan=1.0)
+    keep = d.sort_values(["_dist", "_skew"], kind="stable").drop_duplicates(by)._i
+    return lines.iloc[np.sort(keep.to_numpy())]
+
+
 def book_fairs(lines: pd.DataFrame, p_over: Optional[Callable] = None, weights: Optional[dict] = None,
                hold: dict = None, gap: Optional[Callable] = None) -> pd.DataFrame:
     """consensus() per quote: each book's fair over chance moved to its (key, market)'s median line (nv_c, NaN for a
-    one-sided quote), that line (cline) and the quote's weight (w)."""
+    one-sided quote), that line (cline) and the quote's weight (w). A book's extra lines are dropped first (main_quotes)."""
     if lines.empty:
         return lines.assign(nv=[], nv_c=[], cline=[], w=[])
+    lines = main_quotes(lines)
     d = lines.assign(nv=fair_over(lines, hold).to_numpy())
     med = d.groupby(["key", "market"]).line.transform("median")
     if gap is not None:
