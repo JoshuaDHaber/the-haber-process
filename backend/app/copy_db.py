@@ -19,7 +19,7 @@ import argparse
 import os
 import sys
 
-from sqlalchemy import create_engine, insert, select, text
+from sqlalchemy import create_engine, insert, inspect, select, text
 from sqlalchemy.orm import Session
 
 from . import config
@@ -44,10 +44,16 @@ def copy(source_url: str, target_url: str, log=print, with_history: bool = False
     tables = [t for t in Base.metadata.sorted_tables
               if (with_history or t not in HISTORY) and (with_accounts or t.name not in ACCOUNTS)]
     counts = {}
+    # a table the source doesn't have yet (one added since the source last started) is left empty, not an error
+    have = set(inspect(src).get_table_names())
     with src.connect() as s, Session(dst) as d:
         for table in reversed(tables):
             d.execute(table.delete())
         for table in tables:
+            if table.name not in have:
+                counts[table.name] = 0
+                log(f"  {table.name}: not in the source yet, left empty")
+                continue
             n = 0
             rows = s.execute(select(table)).mappings()
             while batch := [dict(r) for r in rows.fetchmany(BATCH)]:

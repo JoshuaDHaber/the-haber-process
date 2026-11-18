@@ -16,7 +16,7 @@ HOLD = {"td": TD_ASSUMED_HOLD, "ftd": FTD_ASSUMED_HOLD, "dd": DD_ASSUMED_HOLD, "
 PICK_COLUMNS = [
     "player_id", "name", "pos", "team", "opp", "home", "kind", "mu", "sd", "status", "game_id", "gameday", "gametime",
     "side", "line", "odds", "book", "p_model", "p_mkt", "prob", "ev", "kelly", "books", "edge_yds", "flagged", "wx",
-    "flag", "teammate_out", "hours", "w", "median", "dvp_rank", "dvp_n",
+    "flag", "teammate_out", "hours", "w", "median", "dvp_rank", "dvp_n", "p_raw",
 ]
 # a quote this far from the consensus line (or 30% of it) is an alternate or stale line; receptions are counted in catches,
 # passing TDs in touchdowns (lines step 0.5 / 1.5 / 2.5, so a whole TD off the consensus is another line)
@@ -29,6 +29,17 @@ PICK_COLUMNS = [
 YARDS_GAP = {"rush": 0.25, "rec": 0.25, "rr": 0.25, "pass": 0.25}
 STALE_MIN_GAP = {"recs": 1.5, "ptd": 0.9, "pts": 4.0, "reb": 2.0, "ast": 2.0, "threes": 0.9, "pra": 6.0, "pr": 5.0, "pa": 5.0,
                  "stl": 0.9, "blk": 0.9}
+
+
+# Flags beyond the model-market gap, from the NBA's first month of graded picks (Oct 20 to Nov 18, 2026):
+# - double- and triple-double Yes prices longer than +400: 16 of 290 hit where the blend expected 25 (-33% ROI); the
+#   market already overprices them, and the model's picks there were the ones it rated even higher. Triple-doubles went
+#   0 for 41.
+# - EV over MAX_EV (NBA only, the callers' max_ev): those picks lost 13% where 3-5% EV picks made 4.6%. An edge that
+#   big is a model miss far more often than a market one (the calibration curve shrinks most of them now; this catches
+#   what's left).
+LONG_SHOT = {"dd": 400, "tpl": 400}   # yes/no market -> longest Yes price shown on the board
+MAX_EV = 0.20
 
 
 def _dvp(p) -> dict:
@@ -61,9 +72,12 @@ def hours_before(lines: pd.DataFrame, proj: pd.DataFrame) -> pd.Series:
 
 
 def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 0.35, only_book: str = None,
-                dists: dict = None, best_only: bool = True, book_weights: dict = None, fitted: dict = None) -> pd.DataFrame:
+                dists: dict = None, best_only: bool = True, book_weights: dict = None, fitted: dict = None,
+                max_ev: float = None) -> pd.DataFrame:
     """All priced Over/Under candidates. flagged (hidden by default) = model and market disagree by >40-67% (>25% for
-    rushing, receiving, rush + receiving and passing yards: YARDS_GAP), usually a model blind spot; `flag` names the reason ("large gap"). teammate_out is context only: a same-position rotation
+    rushing, receiving, rush + receiving and passing yards: YARDS_GAP), usually a model blind spot; `flag` names the
+    reason ("large gap"), or "long shot" (LONG_SHOT) or "edge too big" (EV over max_ev, when given). teammate_out is
+    context only: a same-position rotation
     receiver in his first game out (redistribute.teammates_out). It isn't a flag: those receivers average a few yards
     over projection, but from a few big games; they beat it no more often than anyone (42.6% vs 42.7%), so their
     Unders hit as often as any.
@@ -75,7 +89,10 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
     The market's chance is the power-devigged consensus of every book at its median line, each book weighted by
     book_weights (market.fit_book_weights; market.BOOK_PRIOR without) and moved to that line along the model's slope.
     market_weight=None uses the fitted weight for each market and for how long before kickoff the price was fetched
-    (`fitted`, market.fit_market_weights); the market floors (MIN_MARKET_WEIGHT) apply either way."""
+    (`fitted`, market.fit_market_weights); the market floors (MIN_MARKET_WEIGHT) apply either way. A market with a
+    calibration curve in `fitted` (market.fit_calibration) prices the model's side from the projection that puts the
+    consensus line on the curve (market.calibrated_mu), with either weight; p_raw keeps the model's chance before it
+    (what the pick logs store, so the curve refits on raw)."""
     if proj.empty or lines.empty:
         return pd.DataFrame(columns=PICK_COLUMNS)
     lines = lines.copy()
@@ -104,6 +121,17 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
             chances[k] = (prob_over_under_dist(p.mu, line, dists[market]) if dists and market in dists
                           else prob_over_under(p.mu, line, p.sd ** 2))
         return chances[k]
+
+    cal_mus = {}   # (player, market) -> the projection its lines are priced from with a calibration curve
+
+    def calibrated_chance(p, market, line, cline, curve):
+        """(p_over, p_under) at this line from the projection that puts the consensus line on the curve
+        (market.calibrated_mu): a book's line off the consensus moves along the model's slope, as the market's does."""
+        k = (p.key, market)
+        if k not in cal_mus:
+            cal_mus[k] = mkt.calibrated_mu(p.mu, p.sd, cline, market, dists.get(market) if dists else None, curve)
+        m = cal_mus[k]
+        return prob_over_under_dist(m, line, dists[market]) if dists and market in dists else prob_over_under(m, line, p.sd ** 2)
 
     medians = {}
 
@@ -139,12 +167,15 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
             po, pu = p.mu, 1 - p.mu  # mu already is the chance (of any TD, or of the game's first)
         else:
             po, pu = chance(p, r.market, r.line)
+        raw = {"Over": po, "Under": pu}
+        curve = None if is_td else mkt.curve_for(fitted, r.market)   # (yes/no markets have no curve: model.fit_doubles)
+        po_cal, pu_cal = calibrated_chance(p, r.market, r.line, c.line, curve) if curve else (po, pu)
         mk_over = c.nv_o
         if not is_td and pd.notna(mk_over) and abs(c.line - r.line) > 1e-9:
             # shift the consensus probability to this book's line using the model's own slope
             po_c = chance(p, r.market, c.line)[0]
             mk_over = float(np.clip(c.nv_o + (po - po_c), 0.02, 0.98))
-        for side, odd, p_side, mk in (("Over", r.over_odds, po, mk_over), ("Under", r.under_odds, pu, 1 - mk_over)):
+        for side, odd, p_side, mk in (("Over", r.over_odds, po_cal, mk_over), ("Under", r.under_odds, pu_cal, 1 - mk_over)):
             if pd.isna(odd):
                 continue
             mk = p_side if pd.isna(mk) else mk  # only one side posted: no market view to blend
@@ -164,14 +195,16 @@ def build_picks(proj: pd.DataFrame, lines: pd.DataFrame, market_weight: float = 
                 abs(ratio - 1) > YARDS_GAP[r.market] if r.market in YARDS_GAP else not (0.6 <= ratio <= 1.67)
             out_ = getattr(p, "teammate_out", "") or ""
             out_ = "" if pd.isna(out_) else str(out_)
-            flag = "large gap" if gap else ""
+            long_shot = side == "Over" and odd > LONG_SHOT.get(r.market, float("inf"))
+            flag = ("large gap" if gap else "long shot" if long_shot
+                    else "edge too big" if max_ev is not None and ev > max_ev else "")
             out.append(dict(
                 player_id=p.player_id, name=p.name, pos=p.pos, team=p.team, opp=p.opp, home=bool(p.home), kind=r.market,
                 mu=p.mu, sd=p.sd, status=p.status, game_id=p.game_id, gameday=p.gameday, gametime=p.gametime,
                 side=side, line=float(r.line), odds=int(odd), book=r.book, p_model=p_side, p_mkt=mk, prob=prob, ev=ev,
                 kelly=max(0.0, ev / (dec - 1)) / 4, books=int(c.books),
                 edge_yds=edge, flagged=bool(flag), wx=wx, flag=flag, teammate_out=out_, hours=hours, w=w,
-                median=None if is_td else median(p, r.market), **_dvp(p)))
+                median=None if is_td else median(p, r.market), p_raw=raw[side], **_dvp(p)))
     df = pd.DataFrame(out, columns=PICK_COLUMNS)
     if df.empty:
         return df

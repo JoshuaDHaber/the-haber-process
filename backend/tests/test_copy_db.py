@@ -76,3 +76,15 @@ def test_without_accounts_leaves_visitors_data_out_and_the_targets_own_alone(tmp
     with Session(make_engine(dst)) as s:
         assert [u.email for u in s.query(User)] == ["laptop.tester@example.com"] and s.query(Bet).count() == 0
         assert s.query(Run).count() == 1   # the site's data still came across
+
+
+def test_a_table_the_source_lacks_is_left_empty(tmp_path):
+    from sqlalchemy import text
+    src, dst = f"sqlite:///{tmp_path}/src.db", f"sqlite:///{tmp_path}/dst.db"
+    eng = _seed(src)
+    with eng.begin() as c:   # a source from before nba_run_tables existed
+        c.execute(text("DROP TABLE nba_run_tables"))
+    logs = []
+    counts = copy(src, dst, log=logs.append)
+    assert counts["nba_run_tables"] == 0 and counts["runs"] == 1
+    assert any("nba_run_tables: not in the source yet" in m for m in logs)

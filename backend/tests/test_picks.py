@@ -133,6 +133,51 @@ def test_thin_history_projections_are_never_priced():
     assert not build_picks(proj(mu=90, thin=False), ln).empty
 
 
+def test_a_calibration_curve_flattens_the_model_before_the_blend_and_p_raw_keeps_it():
+    p = proj(mu=90)
+    ln = lines([("Test Back", "rush", 60.5, -110, -110, "A")])
+    raw = build_picks(p, ln, 0.0).query("side == 'Over'").iloc[0]
+    assert raw.p_raw == raw.p_model                       # no curve: unchanged
+    fitted = {"w": 0.0, "kinds": {}, "calibration": {"rush": dict(a=0.0, b=0.3)}}
+    cal = build_picks(p, ln, None, fitted=fitted).query("side == 'Over'").iloc[0]
+    assert cal.p_raw == pytest.approx(raw.p_model)
+    assert 0.5 < cal.p_model < raw.p_model and cal.prob == pytest.approx(cal.p_model)
+    under = build_picks(p, ln, None, fitted=fitted).query("side == 'Under'").iloc[0]
+    assert under.p_model == pytest.approx(1 - cal.p_model)
+    # the slider's weight still gets the curve
+    assert build_picks(p, ln, 0.0, fitted=fitted).query("side == 'Over'").iloc[0].p_model == pytest.approx(cal.p_model)
+
+
+def test_long_shot_double_doubles_are_flagged():
+    p = proj(kind="dd", mu=0.12, pos="C", name="Big Man")
+    long_ = build_picks(p, lines([("Big Man", "dd", 0.5, 900, None, "A")]), 0.0)
+    assert long_.flagged.all() and set(long_.flag) == {"long shot"}
+    short = build_picks(proj(kind="dd", mu=0.3, pos="C", name="Big Man"), lines([("Big Man", "dd", 0.5, 300, None, "A")]), 0.0)
+    assert not short.flagged.any()
+
+
+def test_an_edge_over_max_ev_is_flagged_only_when_asked():
+    p = proj(mu=75)
+    ln = lines([("Test Back", "rush", 60.5, -110, -110, "A")])
+    plain = build_picks(p, ln, 0.0).query("side == 'Over'").iloc[0]
+    assert plain.ev > 0.2 and not plain.flagged
+    capped = build_picks(p, ln, 0.0, max_ev=0.2).query("side == 'Over'").iloc[0]
+    assert capped.flagged and capped.flag == "edge too big"
+    assert not build_picks(p, ln, 0.0, max_ev=0.2).query("side == 'Under'").iloc[0].flagged
+
+
+def test_a_line_off_the_consensus_is_priced_along_the_model_slope_not_flattened_by_the_curve():
+    p = proj(mu=90)
+    ln = lines([("Test Back", "rush", 60.5, -110, -110, "A"), ("Test Back", "rush", 60.5, -110, -110, "B"),
+                ("Test Back", "rush", 50.5, -200, 160, "Low")])
+    fitted = {"w": 0.0, "kinds": {}, "calibration": {"rush": dict(a=0.0, b=0.05)}}   # all but no signal past the line
+    priced = build_picks(p, ln, None, fitted=fitted, best_only=False).query("side == 'Over'")
+    at_cons = priced[priced.line == 60.5].iloc[0]
+    low = priced[priced.line == 50.5].iloc[0]
+    assert at_cons.p_model == pytest.approx(0.5, abs=0.03)        # the consensus line sits on the curve
+    assert low.p_model > at_cons.p_model + 0.1                    # 10 yards lower is still far likelier
+
+
 def test_a_books_extra_main_market_lines_are_alternates_and_never_priced():
     # Bovada posts a ladder in the main market; only its line nearest the consensus counts, for the board and the market
     ln = lines([("Test Back", "rush", 68.5, -115, -115, "A"), ("Test Back", "rush", 67.5, -110, -120, "B"),

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main, scheduler
-from app.db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal
+from app.db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, NbaRunTables, SessionLocal
 from app.nba import blowout, espn, model
 from app.nba import pipeline as nba_pipeline
 from app.nba import routes as nba_routes
@@ -208,6 +208,8 @@ def test_nba_run_stores_same_game_correlations(monkeypatch):
         run = s.get(NbaRun, rid)
         corr = run.variance["_correlation"]
         b = run.teams[game["game_id"]]["blowout"]
+        kept = s.get(NbaRunTables, rid).tables   # the error tables, kept after the run is pruned
+    assert kept == {k: v for k, v in run.variance.items() if not k.startswith("_") or k == "_doubles"} and "pts" in kept
     assert b["games"] == 800 and [c["margin"] for c in b["chances"]] == list(blowout.THRESHOLDS)
     assert 0.1 < b["chances"][1]["p"] < 0.3 and b["chances"][1]["p_away"] > b["chances"][1]["p_home"]   # NY favored by 2.5
     pairs = corr["pairs"]
@@ -262,9 +264,12 @@ def test_nba_meta_lists_the_slate_and_books(nba_client):
 
 
 def test_nba_picks_moneylines_and_projections(nba_client):
-    picks = nba_client.get("/api/nba/picks", params={"min_ev": -1}).json()
+    picks = nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
     over = next(p for p in picks if p["side"] == "Over")
     assert over["kind"] == "pts" and over["line"] == 24.5 and over["prob"] > 0.5
+    # one book and no fitted weights: an edge over 20%, hidden unless flagged picks are asked for
+    assert over["ev"] > 0.2 and over["flag"] == "edge too big"
+    assert not [p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1}).json() if p["side"] == "Over"]
     [ml] = nba_client.get("/api/nba/moneylines").json()
     away, home = ml["sides"]
     assert (away["team"], home["team"]) == ("BOS", "DET") and home["odds"] == -130 and ml["total"] == 221.5
@@ -272,7 +277,7 @@ def test_nba_picks_moneylines_and_projections(nba_client):
     assert len(nba_client.get("/api/nba/projections", params={"kind": "reb"}).json()) == 1
     # the date filter: the game's own day keeps it, another day has nothing
     day = over["gameday"]
-    assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": day}).json()
+    assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": day, "include_flagged": True}).json()
     assert nba_client.get("/api/nba/picks", params={"min_ev": -1, "gameday": "1999-01-01"}).json() == []
     assert nba_client.get("/api/nba/projections", params={"kind": "reb", "gameday": "1999-01-01"}).json() == []
     # the NFL board never sees NBA quotes
@@ -402,3 +407,48 @@ def test_nba_player_search_covers_the_slate_and_rosters(nba_client, monkeypatch)
     assert [(h["name"], h["projected"]) for h in hits] == [("Star Guard", True), ("Starling Wing", False)]
     assert hits[1]["headshot"].endswith("/r2.png") and hits[1]["team"] == "LAL"
     assert nba_client.get("/api/nba/player-search", params={"q": "big"}).json()[0]["headshot"] == "http://x/r3.png"
+
+
+def _main_rung(client):
+    return next(q for q in client.get("/api/nba/players/p1/lines", params={"kind": "pts"}).json()["quotes"] if not q["alt"])
+
+
+def test_nba_ladder_prices_from_the_calibrated_projection(nba_client):
+    """The ladder's main-line rung reads what the Best props board shows once a market has a calibration curve."""
+    from app import market_fit
+    from app.db import Setting
+    with SessionLocal() as s:
+        s.merge(Setting(key="market_fit_nba", value=dict(fitted_at="2026-11-18T00:00:00", market_weights=dict(
+            w=0.0, kinds={}, calibration={"pts": dict(a=0.0, b=0.3)}))))
+        s.commit()
+    market_fit.clear_cache()
+    try:
+        board = next(p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
+                     if p["side"] == "Over")
+        rung = _main_rung(nba_client)
+        assert rung["over"]["p_model"] == pytest.approx(board["p_model"], abs=2e-3)
+        # a second book posting a ladder in the main market moves neither (one line per book: market.main_quotes)
+        with SessionLocal() as s:
+            t = s.query(NbaOddsLine).filter_by(market="pts").first().fetched_at
+            s.add_all([NbaOddsLine(fetched_at=t, player="Star Guard", market="pts", line=x, over_odds=o, under_odds=u, book="Bovada", game_id=GID)
+                       for x, o, u in ((14.5, -500, 350), (19.5, -300, 220), (24.5, -110, -110))])   # all of it below: the old median moved to 22
+            s.commit()
+        board2 = next(p for p in nba_client.get("/api/nba/picks", params={"min_ev": -1, "include_flagged": True}).json()
+                      if p["side"] == "Over" and p["line"] == 24.5)
+        rung2 = next(q for q in nba_client.get("/api/nba/players/p1/lines", params={"kind": "pts"}).json()["quotes"]
+                     if q["line"] == 24.5 and q["book"] == "FanDuel")
+        assert rung2["over"]["p_model"] == pytest.approx(board2["p_model"], abs=2e-3)
+        with SessionLocal() as s:
+            s.query(NbaOddsLine).filter_by(book="Bovada").delete()
+            s.commit()
+        with SessionLocal() as s:
+            s.query(Setting).filter_by(key="market_fit_nba").delete()
+            s.commit()
+        market_fit.clear_cache()
+        raw = _main_rung(nba_client)
+        assert raw["over"]["p_model"] > rung["over"]["p_model"] + 0.03     # the curve really moved it
+    finally:
+        with SessionLocal() as s:
+            s.query(Setting).filter_by(key="market_fit_nba").delete()
+            s.commit()
+        market_fit.clear_cache()

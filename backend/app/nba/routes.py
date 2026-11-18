@@ -16,9 +16,9 @@ from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, c
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import odds
-from ..engine.ladder import build_ladder, ladder_curve
-from ..engine.market import weight_for
-from ..engine.picks import best_picks, build_picks
+from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, ladder_curve
+from ..engine.market import curve_for, main_quotes, weight_for
+from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
 from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, LadderOut,
                        MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
@@ -103,7 +103,8 @@ def _priced(db: Session, run: NbaRun, version: tuple, w: Optional[float]) -> tup
             _priced_cache.clear()   # only the newest odds and run are asked for
             proj = _proj_frame(db, run.id)
             priced = build_picks(proj, current_lines(db, NbaOddsLine), w, dists=_dists(run), best_only=False,
-                                 book_weights=market_fit.book_weights(db, "nba"), fitted=market_fit.market_weights(db, "nba"))
+                                 book_weights=market_fit.book_weights(db, "nba"), fitted=market_fit.market_weights(db, "nba"),
+                                 max_ev=MAX_EV)
             _priced_cache[key] = proj, market_fit.add_moves(db, "nba", priced, proj, _dists(run))
         return _priced_cache[key]
 
@@ -390,12 +391,16 @@ def player_lines(player_id: str, kind: NbaKind, odds_range: int = Query(300, ge=
     dist = _dists(run).get(kind)
     curve = ladder_curve(quotes, p.mu, kind, dist, market_fit.book_weights(db, "nba"))
     w = market_fit.ladder_weight(market_weight, market_fit.market_weights(db, "nba"), p, main)
+    # the market's calibration curve, through the projection at the consensus line (the board's: one line per book,
+    # market.main_quotes, so Bovada's ladder in the main market doesn't move it), not on each rung
+    cons = main_quotes(main.assign(key=key)).line.median() if not main.empty else None
+    mu = calibrated_mu(p.mu, p.sd, cons, kind, dist, curve_for(market_fit.market_weights(db, "nba"), kind))
     if books.hide_offshore(db):
         quotes = quotes[~quotes.book.isin(books.OFFSHORE)]
     fetched = max((r.fetched_at for r in alts), default=None)
     return LadderOut(kind=kind, mu=p.mu, sd=p.sd, game_id=p.game_id, alt_fetched_at=fetched.isoformat() if fetched else None,
                      curve=curve, w=w if curve else None,
-                     quotes=build_ladder(p.mu, p.sd, quotes, odds_range, kind, dist, curve, w))
+                     quotes=build_ladder(mu, p.sd, quotes, odds_range, kind, dist, curve, w, long_shot=ALT_OVER_LONG_SHOT))
 
 
 def _proj(db: Session, run: Optional[NbaRun], player_id: str, kind: str) -> NbaProjection:

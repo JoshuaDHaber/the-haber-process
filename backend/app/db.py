@@ -130,6 +130,16 @@ class EmptyMarket(Base):
     checked_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class NbaRunTables(Base):
+    """One NBA run's per-kind error tables (engine.model.fit_dist, plus "_doubles": nba/model.fit_doubles' curves), kept
+    after the run itself is pruned (nba/pipeline.KEEP_RUNS keeps four days of runs). The pick logs name the run that
+    priced each pick, so a later backtest of the board or the ladders prices with the exact tables it used."""
+    __tablename__ = "nba_run_tables"
+    run_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)   # nba_runs.id, not a foreign key: it outlives the run
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    tables: Mapped[dict] = mapped_column(JSON)
+
+
 class NbaRun(Base):
     """One NBA model run: projections for the slate (the next two game dates), team ratings, backtest."""
     __tablename__ = "nba_runs"

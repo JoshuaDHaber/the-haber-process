@@ -176,3 +176,15 @@ export const scrollBehavior = (): ScrollBehavior =>
 
 /** A change in chance as signed percentage points: 0.031 -> "+3 pts". */
 export const signedPts = (d: number) => { const r = Math.round(d * 100); return `${r > 0 ? "+" : r < 0 ? "−" : ""}${Math.abs(r)} pts`; };
+
+const FLAG_TITLE: Record<string, string> = {
+  "large gap": "Model and market disagree strongly",
+  "long shot": "A double- or triple-double longer than +400: these have hit well below their price",
+  "edge too big": "EV over 20%: an edge this big is usually something the model is missing",
+};
+
+/** A flagged pick's chip: its reason (older snapshots without one were all large gaps) and the reason's tooltip. */
+export function flagChip(p: { flag?: string }): { label: string; title: string } {
+  const label = p.flag || "large gap";
+  return { label, title: FLAG_TITLE[label] ?? FLAG_TITLE["large gap"] };
+}

@@ -114,8 +114,9 @@ export interface Pick {
   p_model: number; p_mkt: number; prob: number; ev: number; kelly: number; books: number;
   edge_yds: number; flagged: boolean; last5: number[];
   wx?: number | null;
-  /** Why it's flagged (hidden by default): "large gap". Older snapshots lack it. */
-  flag?: "" | "large gap";
+  /** Why it's flagged (hidden by default): model and market far apart, a double/triple-double Yes longer than +400,
+   *  or (NBA) EV over 20%. Older snapshots lack it. */
+  flag?: "" | "large gap" | "long shot" | "edge too big";
   /** Same-position rotation receivers in their first game out (receiving yards). Context only, not a flag. */
   teammate_out?: string;
   /** The market weight it was priced with (the fitted one for its market and fetch time, or the slider's). */
@@ -144,8 +145,10 @@ export interface PlayerDetail {
 }
 
 /** prob blends the model (p_model) with the market curve read off the whole ladder (p_curve); off_curve is the EV against the
- *  curve alone: positive means the price beats what the books' own ladder implies. */
-export interface QuoteSide { odds: number; prob: number; ev: number; link: string | null; p_model?: number | null; p_curve?: number | null; off_curve?: number | null }
+ *  curve alone: positive means the price beats what the books' own ladder implies. flag "long shot": an NBA alternate over
+ *  longer than +250, which has hit well below its price, so its EV isn't counted as an edge. */
+export interface QuoteSide { odds: number; prob: number; ev: number; link: string | null; p_model?: number | null; p_curve?: number | null; off_curve?: number | null;
+  flag?: "" | "long shot" }
 export interface LadderRow { line: number; book: string; alt: boolean; event_link: string | null; over: QuoteSide | null; under: QuoteSide | null }
 export interface Ladder { kind: Kind; mu: number; sd: number; game_id: string; alt_fetched_at: string | null; quotes: LadderRow[];
   /** The market's distribution read off the ladder (location m, spread s, its median) and the weight it gets in each rung's chance. */

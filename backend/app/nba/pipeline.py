@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 
 from .. import config
-from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal
+from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, NbaRunTables, SessionLocal
 from ..engine import correlation as cm
 from ..engine import model as nfl_model
 from ..engine import moneyline as mlm
@@ -165,11 +165,19 @@ def run_projections(log: Log = print, now: Optional[datetime] = None) -> Optiona
         run.projections = rows
         s.add(run)
         s.commit()
+        s.add(NbaRunTables(run_id=run.id, created_at=now, tables=run_tables(run.variance)))
+        s.commit()
         for old in s.query(NbaRun).order_by(NbaRun.id.desc()).offset(KEEP_RUNS).all():
             s.delete(old)
         s.commit()
         log(f"Stored NBA run {run.id}: {len(rows) // len(model.ALL_KINDS)} players projected, {len(set(excluded))} ruled out")
         return run.id
+
+
+def run_tables(variance: dict) -> dict:
+    """The part of a run's variance that prices props: the per-kind error tables and the double-double curves (about
+    7 KB a run; the correlations, moneyline and blowout fits are left out)."""
+    return {k: v for k, v in (variance or {}).items() if not k.startswith("_") or k == "_doubles"}
 
 
 # ---------- odds ----------

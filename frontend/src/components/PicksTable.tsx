@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { GameWeather, Pick } from "../api";
 import { onePerPlayer, type GroupedPick } from "../onePerPlayer";
 import { usePref } from "../prefs";
-import { isNba, isYesNo, KIND_LABEL, americanOdds, fmtEdge, fmtProj, fmtSd, kickoff, matchup, pct, playLabel, signedPct, signedPts } from "../format";
+import { flagChip, isNba, isYesNo, KIND_LABEL, americanOdds, fmtEdge, fmtProj, fmtSd, kickoff, matchup, pct, playLabel, signedPct, signedPts } from "../format";
 import { useSort } from "../useSort";
 import Avatar from "./Avatar";
 import SortBar from "./SortBar";
@@ -69,7 +69,7 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
                   <div>
                     <b>{p.name}</b> <span className="pos-pill">{p.pos}</span> <span className="mut">{p.team}</span>
                     {p.status && <span className="q"> {p.status}</span>}
-                    {p.flagged && <span className="flag" title="Model and market disagree strongly">large gap</span>}
+                    {p.flagged && <span className="flag" title={flagChip(p).title}>{flagChip(p).label}</span>}
                     {p.related.length > 0 && <span className="flag related" title={`Moves with this pick: ${p.related.map((r) => `${KIND_LABEL[r.kind]} ${playLabel(r.kind, r.side, r.line)} (${signedPct(r.ev)} EV)`).join(", ")}. Open the player for all his plays.`}>+{p.related.length} related</span>}
                     {!!p.steam && <span className={`flag ${p.steam > 0 ? "with" : "against"}`} title={`Between the last two odds fetches, three or more books moved this line ${p.steam > 0 ? "toward" : "away from"} this side and none moved the other way.`}>{p.steam > 0 ? "steam with" : "steam against"}</span>}
                     {p.teammate_out && <span className="flag" title={isNba(p.kind)

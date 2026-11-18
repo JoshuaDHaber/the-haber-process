@@ -316,6 +316,7 @@ class QuoteSide(BaseModel):
     p_model: Optional[float] = None    # the model's chance alone
     p_curve: Optional[float] = None    # the market curve's fair chance (market.fit_market_curve)
     off_curve: Optional[float] = None  # EV against the market curve alone: + = priced better than the book's own ladder
+    flag: str = ""                     # "long shot": an NBA alternate over longer than +250 (engine/ladder.ALT_OVER_LONG_SHOT)
 
 
 class LadderRow(BaseModel):

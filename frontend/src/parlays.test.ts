@@ -131,6 +131,10 @@ describe("ladder rungs", () => {
     const needsState = rung(45.5, -200, 0.75, { over: { odds: -200, prob: 0.75, ev: 0, link: "https://sports.{state}.betmgm.com/en/sports?options=6:1-2-3&type=Single" } });
     expect(ladderRungs(over(), ladder(noLink, template, needsState, rung(55.5, -200, 0.75)), "DraftKings").map((r) => r.line)).toEqual([45.5, 55.5]);
   });
+  it("leaves out rungs flagged as long shots", () => {
+    const flagged = rung(25.5, -200, 0.75, { over: { odds: -200, prob: 0.75, ev: 0, link: "https://sportsbook.draftkings.com/?outcomes=25.5", flag: "long shot" } });
+    expect(ladderRungs(over(), ladder(flagged, rung(35.5, -200, 0.75)), "DraftKings").map((r) => r.line)).toEqual([35.5]);
+  });
   it("blends the model's probability with the book's price", () => {
     const [r] = ladderRungs(over(), ladder(rung(30.5, -200, 0.9)), "DraftKings");
     expect(r.prob).toBeCloseTo(0.65 * 0.9 + 0.35 * (1 / 1.5));

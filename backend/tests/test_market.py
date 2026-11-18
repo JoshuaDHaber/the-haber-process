@@ -127,3 +127,32 @@ def test_a_tight_ladder_fits_only_the_center():
     skew = dict(mu=[200.0, 300.0], sd=[60.0, 60.0], z=[float(v) for v in np.quantile(np.random.default_rng(2).gamma(4, 1, 20000) - 3.7, Z_PROBS)])
     c = mkt.fit_market_curve(pts, mu=207.0, dist=skew)
     assert c["s"] == pytest.approx(60.0) and c["median"] == pytest.approx(261.5, abs=1.5)
+
+
+def test_calibration_flattens_an_overconfident_model_and_leaves_thin_or_yes_no_markets_alone():
+    rng = np.random.default_rng(7)
+    n = 6000
+    pm = rng.uniform(0.1, 0.9, n)
+    lg = np.log(pm / (1 - pm))
+    truth = 1 / (1 + np.exp(-0.4 * lg))                  # the model is far surer than it should be
+    y = (rng.uniform(size=n) < truth).astype(float)
+    noise = rng.uniform(0.1, 0.9, n)                     # a model that knows nothing
+    rows = pd.DataFrame(dict(kind=["pts"] * n + ["pa"] * n + ["reb"] * 50 + ["dd"] * n,
+                             p_model=np.r_[pm, noise, pm[:50], pm], y=np.r_[y, y, y[:50], y]))
+    cal = mkt.fit_calibration(rows)
+    assert 0.3 < cal["pts"]["b"] < 0.5 and abs(cal["pts"]["a"]) < 0.1 and cal["pts"]["n"] == n
+    assert cal["pa"]["b"] < 0.1                          # no signal: the curve all but ignores the model
+    assert "reb" not in cal and "dd" not in cal          # too few picks; yes/no markets have their own curve
+    # few picks: pulled toward no change
+    few = mkt.fit_calibration(rows[rows.kind == "pts"].head(150), n0=150)
+    assert few["pts"]["b"] > cal["pts"]["b"]
+
+
+def test_calibrate_moves_both_sides_and_keeps_a_push_between_them():
+    assert mkt.calibrate(0.7, 0.3, None) == (0.7, 0.3)
+    over, under = mkt.calibrate(0.7, 0.3, dict(a=0.0, b=0.5))
+    assert 0.5 < over < 0.7 and over + under == pytest.approx(1.0)
+    over, under = mkt.calibrate(0.6, 0.3, dict(a=0.0, b=0.5))    # whole-number line: 10% push
+    assert over + under < 1.0
+    assert mkt.curve_for({"calibration": {"pts": dict(a=0.0, b=0.5)}}, "pts") == dict(a=0.0, b=0.5)
+    assert mkt.curve_for({"w": 0.5}, "pts") is None and mkt.curve_for(None, "pts") is None

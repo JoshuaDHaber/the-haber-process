@@ -105,7 +105,7 @@ def test_grades_endpoint_reports_the_nba_record_by_week():
     with SessionLocal() as s:
         grading.grade(s, logs(box("p1", "DET", pts=30.0), box("p2", "DET", pts=8.0), box("x", "BOS")), date(2026, 10, 21),
                       fetch=lambda *a, **k: pd.DataFrame())
-        s.query(NbaPickLog).update({"ev": 0.05})   # every pick on the visible board
+        s.query(NbaPickLog).update({"ev": 0.05, "flagged": False})   # every pick on the visible board
         s.commit()
     with TestClient(main.app) as c:
         g = c.get("/api/nba/grades").json()
