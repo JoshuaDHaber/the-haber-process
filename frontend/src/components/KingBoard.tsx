@@ -46,7 +46,7 @@ function Row({ r, onSelect, chip }: { r: KingRow; onSelect: Select; chip: boolea
       <td data-label="Top 3">{pct(r.p_top3, 0)}</td>
       <td data-label="Leads slate"><b>{pct(r.p_top, r.p_top < 0.1 ? 1 : 0)}</b><span className="meter" aria-hidden><i style={{ width: `${Math.min(100, r.p_top * 250)}%` }} /></span>
         <span className="mut">fair {fair(r.p_top)}</span></td>
-      <td className="c-ev">{p ? <span className={`ev-pill${p.ev < 0 ? " neg" : ""}`} title="EV of his PRA over at this price">{signedPct(p.ev)}</span> : <span className="mut">–</span>}</td>
+      <td className={`c-ev${p ? "" : " no-price"}`}>{p ? <span className={`ev-pill${p.ev < 0 ? " neg" : ""}`} title="EV of his PRA over at this price">{signedPct(p.ev)}</span> : <span className="mut">–</span>}</td>
     </tr>
   );
 }

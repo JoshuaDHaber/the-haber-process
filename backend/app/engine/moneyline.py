@@ -131,7 +131,8 @@ def project(sched: pd.DataFrame, season: int, week: int, sigma: float) -> dict:
         out[g.game_id] = dict(home=g.home_team, away=g.away_team, gameday=str(g.gameday),
                               gametime="" if pd.isna(g.gametime) else str(g.gametime), margin=m, p_home=win_prob(m, sigma),
                               home_rating=r.get(g.home_team, 0.0), away_rating=r.get(g.away_team, 0.0),
-                              spread=None if pd.isna(getattr(g, "spread_line", np.nan)) else float(g.spread_line))
+                              spread=None if pd.isna(getattr(g, "spread_line", np.nan)) else float(g.spread_line),
+                              total=None if pd.isna(getattr(g, "total_line", np.nan)) else float(g.total_line))
     return out
 
 

@@ -245,6 +245,7 @@ tr.clickable:hover td:last-child { border-top-right-radius: 10px; border-bottom-
   .t-picks td, .t-proj td, .t-hot td { padding: 0; border: 0; text-align: left; white-space: normal; min-width: 0; border-radius: 0 !important; box-shadow: none !important; }
   .t-picks td[data-label]::before, .t-proj td[data-label]::before, .t-hot td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--mut); margin-bottom: 2px; }
   .t-picks tr::after, .t-proj tr::after, .t-hot tr::after { content: "Tap for details ›"; grid-column: 1 / -1; justify-self: end; font-size: 12px; font-weight: 600; color: var(--acc); }
+  .t-hot tr.no-tap::after { content: none; }   /* a row that opens nothing (King of the Endzone's team entries) */
   .t-picks .meter, .t-hot .meter { margin-left: 0; width: 100%; max-width: 160px; }
 
   /* picks: player + EV, then the play, then the numbers */
@@ -686,6 +687,7 @@ table, .tile-value, .parlay-odds, .parlay-stats dd, .leg-odds, .pill-count, .cou
 .stale-banner b { color: var(--bad); }
 .odds-stale .ev-pill, .odds-stale .ev-text, .odds-stale .tile-value em, .odds-stale .c-kelly, .odds-stale .parlay-stats dd.pos { filter: grayscale(1); opacity: .55; }
 .odds-stale .c-ev::after { content: "old price"; display: block; margin-top: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--bad); }
+.odds-stale .c-ev.no-price::after { content: none; }   /* nothing priced, so nothing old */
 .stale-ack { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; cursor: pointer;
   background: color-mix(in srgb, var(--bad) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); }
 .stale-ack input { margin-top: 2px; flex: none; } .stale-ack b { color: var(--bad); }

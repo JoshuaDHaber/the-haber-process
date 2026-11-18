@@ -494,3 +494,58 @@ def test_a_teams_moneyline_ladder_and_hot_teams(client, monkeypatch):
     assert (q["book"], q["line"], q["over"]["odds"], q["under"]["odds"]) == ("X", 0.0, -150, 130)
     assert client.get("/api/moneylines/2026_04_BBB_AAA/CCC/lines").status_code == 404
     assert client.get("/api/hot-teams").json() == []   # this run's game kicked off long ago
+
+
+def test_moneylines_carry_an_early_win_token_once_the_run_has_lead_paths(client, monkeypatch):
+    assert all(s["token"] is None for s in client.get("/api/moneylines").json()[0]["sides"])   # no lead path: no token
+    with SessionLocal() as s:
+        run = s.scalars(main.select(Run).order_by(Run.id.desc())).first()
+        old = run.teams
+        run.teams = {gid: dict(g, lead=dict(mu=3.5, sd=13.0, c=1.7, hl_k=0.3, hl_m=1.2, hl_c=-2.0, games=100,
+                                            season={"AAA": [[21.0, True], [3.0, False]], "BBB": []})) for gid, g in old.items()}
+        s.commit()
+    try:
+        main._pick_cache.clear()
+        away, home = client.get("/api/moneylines", params={"lead_by": 17}).json()[0]["sides"]
+        assert home["token"]["threshold"] == 17 and home["token"]["p_lead"] > away["token"]["p_lead"]
+        assert (home["token"]["games"], home["token"]["up"], home["token"]["up_lost"]) == (2, 1, 0)
+        assert client.get("/api/moneylines").json()[0]["sides"][1]["token"]["threshold"] == main.early_win.THRESHOLD
+    finally:
+        with SessionLocal() as s:
+            run = s.scalars(main.select(Run).order_by(Run.id.desc())).first()
+            run.teams = old
+            s.commit()
+
+
+def test_king_of_the_endzone_simulates_the_game_from_its_anytime_chances(client):
+    assert client.get("/api/promos/endzone").json()["rows"] == []   # a run without touchdown lengths: an empty board
+    from app.engine import endzone
+    tds = pd.DataFrame([dict(player_id=p, kind=k, yards=y, game_id="g", season=2025, week=1, team="AAA")
+                        for p, k, ys in (("p9", "rec", (40, 60, 75)), ("x", "rush", (1, 2, 5, 20)), ("d", "ret", (90,))) for y in ys])
+    ez = endzone.summarize(tds, {"p9": "WR", "x": "RB"}, pd.DataFrame({"game_id": ["g"], "home_score": [24.0], "away_score": [20.0]}))
+    with SessionLocal() as s:
+        run = s.scalars(main.select(Run).order_by(Run.id.desc())).first()
+        old_var, old_teams = run.variance, run.teams
+        run.variance = dict(old_var, _endzone=ez)
+        run.teams = {gid: dict(g, total=44.5, endzone={"own": {"p9": endzone.own_lengths(tds, ["p9"])["p9"]}}) for gid, g in old_teams.items()}
+        run.projections.append(Projection(player_id="p9", name="Deep Threat", pos="WR", team="AAA", opp="BBB", home=True, kind="td", mu=0.35,
+                                          sd=0.0, vol=0.0, eff=0.0, spread=3.0, status="Questionable", game_id="2026_04_BBB_AAA",
+                                          gameday="2026-10-04", gametime="13:00", last5=[]))
+        s.commit()
+    try:
+        b = client.get("/api/promos/endzone", params={"book": "X"}).json()
+        assert b["game_id"] == "2026_04_BBB_AAA" and b["label"] == "BBB @ AAA" and b["total"] == 44.5 and not b["total_assumed"]
+        names = [r["name"] for r in b["rows"]]
+        assert len(names) == 5 and "Rest of AAA offense" in names and "BBB defense & returns" in names
+        me = next(r for r in b["rows"] if r["player_id"] == "p9")
+        assert 0 < me["p_td"] <= 0.35 + 1e-9                             # his own chance, scaled down only if the team can't hold it
+        assert me["status"] == "Questionable" and me["pick"] is None and me["n_tds"] == 3 and me["median_td"] == 60
+        assert abs(sum(r["p_long"] for r in b["rows"]) - (1 - b["p_no_td"])) < 1e-6
+    finally:
+        with SessionLocal() as s:
+            run = s.scalars(main.select(Run).order_by(Run.id.desc())).first()
+            run.variance, run.teams = old_var, old_teams
+            for p in [p for p in run.projections if p.kind == "td"]:
+                s.delete(p)
+            s.commit()
+        main._endzone_cache.clear()

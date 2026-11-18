@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import auth, bet_screens, bets, books, config, grading, slip_sync, market_fit, pipeline, scheduler, standings
 from .db import AltLine, OddsLine, Projection, Run, SessionLocal, SyncRun, current_lines, proj_frame
-from .engine import data, model, odds
+from .engine import data, early_win, endzone, model, odds
 from .engine import injuries as injm
 from .engine import moneyline as mlm
 from .engine import hot as hotm
@@ -32,8 +32,9 @@ from .engine.ladder import build_ladder, ladder_curve
 from .engine.market import weight_for
 from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
+from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings)
 
 @asynccontextmanager
@@ -204,6 +205,7 @@ def _release_memory():
     _pick_cache.clear()
     _priced_cache.clear()
     _hot_cache.clear()
+    _endzone_cache.clear()
     market_fit.clear_cache()
     nba_routes.clear_caches()
     gc.collect()
@@ -406,10 +408,12 @@ def grades(request: Request, season: Optional[int] = None, db: Session = Depends
 
 
 @app.get("/api/moneylines", response_model=list[MoneylineGame])
-def moneylines(book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1), db: Session = Depends(get_db)):
-    """Both teams' win chances for every game of the week (model, market, blend), with the best moneyline and its EV."""
+def moneylines(book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1),
+               lead_by: float = Query(early_win.THRESHOLD, ge=1, le=40), db: Session = Depends(get_db)):
+    """Both teams' win chances for every game of the week (model, market, blend), with the best moneyline and its EV,
+    and each side's early-win token (it pays once the team goes up by lead_by)."""
     run = latest_run(db)
-    return build_moneylines(db, run, market_weight, book)
+    return lead.token(build_moneylines(db, run, market_weight, book), run.teams if run and run.teams else {}, lead_by)
 
 
 def build_moneylines(db: Session, run: Optional[Run], market_weight: Optional[float] = None, book: Optional[str] = None) -> list[dict]:
@@ -419,6 +423,46 @@ def build_moneylines(db: Session, run: Optional[Run], market_weight: Optional[fl
     w = weight_for(market_fit.market_weights(db, "nfl"), "ml", None) if market_weight is None else market_weight
     return mlm.price(run.teams, lines, w, books.pricing_books(book, lines.get("book", []), books.hide_offshore(db)),
                      book_weights=market_fit.book_weights(db, "nfl"))
+
+
+_endzone_cache: dict = {}
+
+
+@app.get("/api/promos/endzone", response_model=EndzoneBoard)
+def king_of_the_endzone(game_id: Optional[str] = None, book: Optional[str] = None, db: Session = Depends(get_db)):
+    """King of the Endzone: each player's chance to score one game's longest touchdown (the next game to kick off when
+    game_id is left out), with his anytime TD at the board's book."""
+    run = latest_run(db)
+    ez_inputs = (run.variance or {}).get("_endzone") if run else None
+    if not run or not run.teams or not ez_inputs:
+        return EndzoneBoard()
+    games = sorted(run.teams.items(), key=lambda kv: (kv[1]["gameday"], kv[1]["gametime"], kv[0]))
+    now = datetime.utcnow()
+    upcoming = [gid for gid, g in games if (market_fit.kickoff_utc(g["gameday"], g["gametime"]) or now) > now]
+    gid = game_id if game_id in run.teams else (upcoming or [games[0][0]])[0]
+    g = run.teams[gid]
+    scorers = db.scalars(select(Projection).where(Projection.run_id == run.id, Projection.kind == "td", Projection.game_id == gid)).all()
+    # the anytime chance the board uses (model and market blended, any book), and his price at this book
+    priced = all_picks(db, run, None)
+    td = priced[priced.kind == "td"] if not priced.empty else priced
+    prob = {} if td.empty else {r.player_id: (r.prob if r.side == "Over" else 1 - r.prob) for r in td.itertuples()}
+    at_book = all_picks(db, run, None, book)
+    yes = {} if at_book.empty else {r["player_id"]: r for r in records(at_book[(at_book.kind == "td") & (at_book.side == "Over")])}
+    own = (g.get("endzone") or {}).get("own", {})
+    players = [dict(player_id=p.player_id, name=p.name, pos=p.pos, team=p.team, prob=prob.get(p.player_id, p.mu), own=own.get(p.player_id))
+               for p in scorers]
+    key = (run.id, gid, tuple(sorted((p["player_id"], round(float(p["prob"]), 4)) for p in players)))
+    if key not in _endzone_cache:   # the draws only change with the run and the anytime chances
+        if len(_endzone_cache) > 40:
+            _endzone_cache.clear()
+        _endzone_cache[key] = endzone.board(players, dict(home=g["home"], away=g["away"], spread=g.get("spread"), total=g.get("total")),
+                                            ez_inputs, seed=run.id)
+    b = _endzone_cache[key]
+    status = {p.player_id: p.status or "" for p in scorers}
+    rows = [dict(r, status=status.get(r["player_id"], ""), pick=yes.get(r["player_id"])) for r in b["rows"]]
+    return EndzoneBoard(game_id=gid, label=game_label(gid), gameday=g["gameday"], gametime=g["gametime"], total=b["total"],
+                        total_assumed=b["total_assumed"], spread=g.get("spread"), median_longest=b["median_longest"],
+                        p_no_td=b["p_no_td"], p_tie=b["p_tie"], sims=endzone.SIMS, rows=rows)
 
 
 @app.get("/api/moneylines/{game_id}/{team}/lines", response_model=LadderOut)

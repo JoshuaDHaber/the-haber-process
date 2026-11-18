@@ -438,6 +438,38 @@ class KingBoard(BaseModel):
     players: list[KingRow] = []
 
 
+class EndzoneRow(BaseModel):
+    """One entry on the King of the Endzone board (engine/endzone.py): a listed scorer, the rest of an offense, or a
+    team's defense and returns."""
+    player_id: Optional[str] = None
+    name: str
+    pos: str = ""
+    team: str
+    kind: Literal["player", "other", "ret"]
+    p_td: float                         # the chance he (they) score at least once
+    p_long: float                       # the chance of the game's longest TD, ties split evenly (dead-heat equity)
+    p_long_if_td: float                 # given he scores, how often his longest is the game's longest (ties count)
+    median_td: Optional[float] = None   # his touchdowns' median length over the last three seasons
+    n_tds: int = 0                      # how many of them
+    status: str = ""
+    pick: Optional[PickOut] = None      # his anytime TD at the board's book, when posted
+
+
+class EndzoneBoard(BaseModel):
+    game_id: Optional[str] = None
+    label: str = ""
+    gameday: str = ""
+    gametime: str = ""
+    total: Optional[float] = None       # the game total the team TDs come from
+    total_assumed: bool = False         # no total posted: the league's average game
+    spread: Optional[float] = None      # the home side's
+    median_longest: Optional[float] = None
+    p_no_td: float = 0.0
+    p_tie: float = 0.0
+    sims: int = 0
+    rows: list[EndzoneRow] = []
+
+
 class InjuredPlayer(BaseModel):
     player_id: str
     name: str

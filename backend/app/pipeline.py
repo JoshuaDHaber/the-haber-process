@@ -14,10 +14,13 @@ from .db import AltLine, EmptyMarket, OddsHistory, OddsLine, Projection, Run, Se
 from .engine import data, model, odds
 from .odds_keys import KeyRing
 from .engine import correlation as cm
+from .engine import early_win as ew
+from .engine import endzone as ez
 from .engine import injuries as injm
 from .engine import moneyline as mlm
 from .engine import redistribute as rd
 from .engine import td as tdm
+from .nba import lead
 from .engine import weather as wxm
 
 Log = Callable[[str], None]
@@ -256,6 +259,7 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
     gone = proj[proj.status.isin(drop)]
     excluded = sorted({f"{n} ({s_})" for n, s_ in zip(gone["name"], gone.status)})
     proj = proj[~proj.status.isin(drop)]
+    _add_promos(teams, var_params, sched, stats, proj, season, seasons, log)
 
     with SessionLocal() as s:
         run = Run(season=season, week=week, backtest=bt_sum, variance=var_params,
@@ -273,6 +277,32 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
         s.commit()
         log(f"Stored run {run.id}: {len(run.projections)} projections, {len(excluded)} players excluded")
         return run.id
+
+
+def _add_promos(teams: dict, var_params: dict, sched: pd.DataFrame, stats: pd.DataFrame, proj: pd.DataFrame, season: int,
+                seasons: list, log: Log) -> None:
+    """What the Promos page prices from: each game's early-win lead path (teams[gid]["lead"]), and King of the Endzone's
+    touchdown lengths (league-wide in var_params["_endzone"], each listed scorer's own in teams[gid]["endzone"]). The run
+    goes out without either if it fails."""
+    try:
+        leads = data.load_leads(range(ew.LEADS_FIRST_SEASON, season + 1), keep_raw=seasons)
+        paths, lead_fit = ew.project(ew.history(sched, leads), teams, season)
+        for gid, p in paths.items():
+            teams[gid]["lead"] = p
+        log(f"Early win: lead chances for {len(paths)} games ({lead.describe(lead_fit)})")
+    except Exception as e:
+        log(f"Early win: couldn't work out lead chances ({e})")
+    try:
+        tds = data.load_tds(seasons)
+        positions = dict(zip(stats.player_id, stats.position))
+        var_params["_endzone"] = ez.summarize(tds, positions, sched[sched.home_score.notna() & sched.season.isin(seasons)])
+        scorers = proj[proj.kind == "td"]
+        own = ez.own_lengths(tds, scorers.player_id)
+        for gid, g in teams.items():
+            g["endzone"] = {"own": {pid: own[pid] for pid in scorers[scorers.game_id == gid].player_id if pid in own}}
+        log(f"King of the Endzone: {var_params['_endzone']['tds']:,} touchdowns' lengths over {len(seasons)} seasons")
+    except Exception as e:
+        log(f"King of the Endzone: couldn't load touchdown lengths ({e})")
 
 
 def _correlation_line(c: dict) -> str:
