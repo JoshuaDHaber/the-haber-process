@@ -93,7 +93,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
           <Menu label={<IconDots size={16} stroke={1.75} aria-hidden />} ariaLabel={`Actions for this ${title.toLowerCase()}`} caret={false} buttonClass="icon-btn">
             {(close) => <>
               <MenuItem onClick={() => { close(); startEdit(); }}>Edit stake, odds, promo and tags</MenuItem>
-              <MenuItem onClick={() => { close(); save.mutate(bet.bonus ? { bonus: false } : { bonus: true, boost: 0, no_sweat: 0 }); }}>{bet.bonus ? "Not a bonus bet" : "Mark as bonus bet"}</MenuItem>
+              {!bet.boost && !bet.no_sweat && <MenuItem onClick={() => { close(); save.mutate({ bonus: !bet.bonus }); }}>{bet.bonus ? "Not a bonus bet" : "Mark as bonus bet"}</MenuItem>}
               {(["won", "lost", "push", "void"] as BetStatus[]).filter((s) => !(bet.settled_by === "user" && bet.status === s)).map((s) => (
                 <MenuItem key={s} onClick={() => { close(); save.mutate({ status: s }); }}>Mark {STATUS_TEXT[s].toLowerCase()}</MenuItem>
               ))}
@@ -124,7 +124,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
       ) : (
         <p className="bet-foot mut">
           {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>{bet.boost && <>, boosted {bet.boost}%</>}
-          {bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b></> : bet.payout != null && <> → returned <b>{money(bet.payout)}</b></>}
+          {bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b>{bet.no_sweat && <>, or <b>{money(bet.no_sweat)}</b> back as a bonus bet if it loses</>}</> : bet.payout != null && <> → returned <b>{money(bet.payout)}</b></>}
           {bet.refund > 0 && <>, plus <b>{money(bet.refund)}</b> back as a bonus bet</>}
           {" · "}placed {new Date(bet.placed_at + "Z").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
           {bet.ev_close != null && <> · <span className={bet.ev_close > 0 ? "good" : "bad"}

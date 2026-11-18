@@ -97,7 +97,7 @@ export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: sli
       <PromoFields promo={promo} onChange={setPromo} stake={stakeOk ? stakeN : 0} book={book} />
       <label className="auth-label" htmlFor="track-tags">Tags <span className="mut">(optional, to sort My bets)</span></label>
       <TagInput id="track-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
-      <p className="mut track-pays">
+      <p className="mut track-pays" aria-live="polite">
         {!promoOk ? (promo.kind === "boost" ? "Enter the boost, like 50%" : "Enter the refund in dollars")
           : asParlay ? (pays != null ? <>Pays <b>{money(pays)}</b> if every leg wins</> : !oddsN ? "Enter the price as American odds, like +264" : "Enter a stake")
           : legs.length > 1 ? (stakeOk ? <>{legs.length} bets, <b>{money(stakeN * legs.length)}</b> in {bonus ? "bonus bets" : "all"}, each at its own price</> : "Enter a stake")

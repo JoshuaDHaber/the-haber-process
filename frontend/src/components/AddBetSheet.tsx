@@ -285,7 +285,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
         <TagInput id="add-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
         {late && !tooOld && <p className="warn add-late">{mode === "prop" ? "This game has started" : "This has started"}, so it's added
           as <b>late</b>: My bets marks it, since you may have known how it went. It's graded like any other bet.</p>}
-        <p className="mut track-pays">{!promoReady(promo, stakeN) ? (promo.kind === "boost" ? "Enter the boost, like 50%" : "Enter the refund in dollars")
+        <p className="mut track-pays" aria-live="polite">{!promoReady(promo, stakeN) ? (promo.kind === "boost" ? "Enter the boost, like 50%" : "Enter the refund in dollars")
           : pays != null ? <>Pays <b>{money(pays)}</b> if it wins</> : "Fill in the bet, sportsbook, odds and stake"}</p>
         {problem && <p className="err auth-problem" role="alert">{problem}</p>}
         <button className="primary" disabled={!ready || busy}>{busy ? "Saving…" : mode === "prop" && allLegs.length > 1 ? `Add ${allLegs.length}-leg parlay` : "Add bet"}</button>
