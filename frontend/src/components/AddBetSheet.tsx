@@ -178,7 +178,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
             <IconPhoto size={16} stroke={1.75} aria-hidden />{reading ? "Reading the slip…" : "Upload a screenshot"}
           </button>
           <span className="mut">{claude ? "Fills in the bet from your slip for you to check. The image isn't kept."
-            : "Fills in the bet from a bet365 or FanDuel slip for you to check. The image stays on your device."}</span>
+            : "Fills in the bet from a bet365, FanDuel or DraftKings slip for you to check. The image stays on your device."}</span>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />
           {IOS && <span className="mut add-shortcut">On iPhone or iPad, <a href={SHORTCUT} target="_blank" rel="noopener noreferrer">add the Shortcut</a> to share a slip here
             straight from your sportsbook app.</span>}
