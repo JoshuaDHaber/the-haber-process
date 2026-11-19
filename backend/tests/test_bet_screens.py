@@ -231,7 +231,7 @@ def test_the_text_endpoint_matches_legs_to_the_board(sent):
         assert [l["graded"] for l in d["legs"]] == [False, False] + [True] * 8
         assert any("stake" in n for n in d["notes"])
         empty = c.post("/api/me/bets/read-slip-text", json={"text": "a photo of a dog"}).json()
-        assert empty["legs"] == [] and "bet365 and FanDuel" in empty["notes"][0]
+        assert empty["legs"] == [] and "bet365, FanDuel and DraftKings" in empty["notes"][0]
         assert c.post("/api/me/bets/read-slip-text", json={"text": "x" * 20001}).status_code == 422
     with TestClient(main.app, client=("198.51.100.33", 5000)) as anon:
         assert anon.post("/api/me/bets/read-slip-text", json={"text": slip("bet365")}).status_code == 401
@@ -275,6 +275,24 @@ def test_a_profit_boost_on_the_slips_own_price_or_a_no_sweat_bet_is_set_on_the_d
     assert (boosted.boost, boosted.no_sweat) == (50, False)   # one promo a bet: the boost is what the slip's price leans on
     assert any("50%" in n for n in boosted.notes)
     assert (insured.boost, insured.no_sweat) == (None, True) and not free.no_sweat
+
+
+@pytest.mark.parametrize("reader", ["", "-apple"])
+def test_the_draftkings_text_reads_every_leg_through_the_icons_noise(reader):
+    s = slip_text.parse(slip("draftkings" + reader))
+    assert (s["sportsbook"], s["bet_type"], s["odds"], s["stake"], s["to_return"]) == ("DraftKings", "parlay", 1700, 4.86, 87.48)
+    assert [(l["player"], l["kind"], l["side"], l["line"]) for l in s["legs"]] == [
+        ("Luka Doncic", "pts", "Over", 34.5), ("Brandon Miller", "pts", "Over", 19.5), ("Luka Doncic", "threes", "Over", 4.5),
+        ("Coby White", "pa", "Over", 19.5),   # Tesseract reads the headshot as "a4," before the name
+        ("Quentin Grimes", "pts", "Over", 11.5), ("Matisse Thybulle", "stl", "Over", 1.5)]
+    assert s["legs"][3]["text"] == "Coby White 20+ Points + Assists"
+
+
+def test_a_draftkings_main_line_and_a_market_the_site_doesnt_project():
+    s = slip_text.parse("DRAFTKINGS\nSGP\n2 Pick Parlay | +264\nWager: $10.00\nO 24.5\nJalen Brunson Points\n"
+                        "6+\nJosh Hart Rebounds + Assists\n")
+    assert [(l["player"], l["kind"], l["side"], l["line"]) for l in s["legs"]] == [
+        ("Jalen Brunson", "pts", "Over", 24.5), ("Josh Hart", "other", "Over", 5.5)]
 
 
 @pytest.mark.parametrize("reader", ["", "-apple"])
