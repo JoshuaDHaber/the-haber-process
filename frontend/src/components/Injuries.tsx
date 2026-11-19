@@ -73,14 +73,14 @@ function Team({ team, home, players, side, showReserve, onSelect }: {
   const shown = showReserve ? bySide : report;
   return (
     <section className="inj-team">
-      <h4><b>{team}</b> <span className="mut">{home ? "home" : "away"}</span></h4>
+      <h3><b>{team}</b> <span className="mut">{home ? "home" : "away"}</span></h3>
       <p className="mut inj-sum">{summary(report)}{!showReserve && reserve.length > 0 && ` · ${reserve.length} on IR/reserve`}</p>
       {GROUPS.filter(([g]) => side === "all" || g === side).map(([g, label]) => {
         const list = shown.filter((p) => p.side === g);
         if (!list.length) return null;
         return (
           <div key={g}>
-            {side === "all" && getLeague() !== "nba" && <h5>{label}</h5>}
+            {side === "all" && getLeague() !== "nba" && <h4>{label}</h4>}
             <ul className="inj-list">{list.map((p) => <Row key={p.player_id} p={p} onSelect={onSelect} />)}</ul>
           </div>
         );

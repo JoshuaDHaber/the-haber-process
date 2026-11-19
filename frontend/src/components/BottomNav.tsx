@@ -1,11 +1,11 @@
-import { IconChartDots, IconChartLine, IconDots, IconFirstAidKit, IconFlame, IconLayoutGrid, IconListDetails, IconReceipt, IconScale, IconSettings,
+import { IconChartDots, IconChartLine, IconDots, IconFirstAidKit, IconFlame, IconGift, IconLayoutGrid, IconListDetails, IconReceipt, IconScale, IconSettings,
   IconStack2, type Icon } from "@tabler/icons-react";
 import { useBetSlip } from "../BetSlipContext";
 import Menu, { MenuItem } from "./Menu";
 import { routeClick } from "./NavLink";
 
 const ICON: Record<string, Icon> = { games: IconLayoutGrid, picks: IconListDetails, hot: IconFlame, parlays: IconStack2, projections: IconChartLine,
-  injuries: IconFirstAidKit, compare: IconScale, model: IconChartDots, check: IconChartDots, admin: IconSettings };
+  injuries: IconFirstAidKit, compare: IconScale, model: IconChartDots, check: IconChartDots, admin: IconSettings, promos: IconGift };
 const SHORT: Record<string, string> = { picks: "Props" };
 /** Sections that get their own slot; the rest go under More (five slots in all, with the slip). */
 const SLOTS = 3;

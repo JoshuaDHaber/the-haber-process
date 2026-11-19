@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Bar, BarChart, CartesianGrid, Cell as BarCell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, type Kind } from "../api";
@@ -67,8 +67,15 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
   const lines = yesNo ? [] : [...new Set(atBook.filter((q) => !q.alt).map((q) => q.line))].sort((a, b) => a - b);
   const cellsOf = (rows: typeof quotes) => rows.flatMap((r) => [bestOf([r], "over"), bestOf([r], "under")]).filter((c): c is Cell => !!c);
   // the play: the one clicked to get here, else the best-EV main line at the chosen book
-  const picked = pick && kind === initialKind
+  const ladderPick = pick && kind === initialKind
     ? cellsOf(quotes).find((c) => c.side === pick.side && c.row.line === pick.line && c.row.book === pick.book) : undefined;
+  // opened from a board row: show that row's own win prob and EV, so the same play reads the same on the card and here (the
+  // board blends the model with the books' consensus; the ladder with a curve fitted to every rung, which can differ a little)
+  const qc = useQueryClient();
+  const boardRow = ladderPick ? boardRowFor(qc, playerId, kind, ladderPick) : undefined;
+  const picked = ladderPick && boardRow
+    ? { ...ladderPick, q: { ...ladderPick.q, prob: boardRow.prob, ev: boardRow.ev, p_model: boardRow.p_model ?? ladderPick.q.p_model, p_curve: boardRow.p_mkt ?? ladderPick.q.p_curve } }
+    : ladderPick;
   const best = cellsOf(atBook.filter((q) => !q.alt)).reduce<Cell | null>((b, c) => (!b || c.q.ev > b.q.ev ? c : b), null);
   const play = picked ?? best;
 
@@ -160,7 +167,7 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
                 : yesNo ? <>Touches <b>{proj.vol.toFixed(1)}</b> · TDs per touch <b>{(proj.eff / Math.max(proj.vol, 0.1)).toFixed(3)}</b></>
                 : <>Std dev <b>{fmtSd(kind, proj.sd)}</b> · {volLabel(kind)} <b>{proj.vol.toFixed(1)}</b> · {effText(kind, proj.eff)[0]} <b>{effText(kind, proj.eff)[1]}</b></>}
             </p>}
-            {!proj.thin && <WhyPanel kind={kind} proj={proj} play={play} curveWeight={ladder.data?.w} nba={isNba(kind)} />}
+            {!proj.thin && <WhyPanel kind={kind} proj={proj} play={play} curveWeight={boardRow && picked === play ? boardRow.w ?? ladder.data?.w : ladder.data?.w} nba={isNba(kind)} />}
 
             {hitLine != null && (
               <HitSplits kind={kind} logs={allLogs} side={side} line={hitLine} opp={proj.opp} home={proj.home} modelChance={play ? play.q.p_model ?? play.q.prob : null} />
@@ -283,7 +290,7 @@ function Verdict({ kind, mu, play, picked, book, ctx, loading, stale, onLeave }:
         <div className="v-price"><span className="odds">{americanOdds(play.q.odds)}</span><BookName book={play.row.book} size={16} /></div>
       </div>
       <div className="v-stats">
-        <span>Win chance <b>{pct(play.q.prob, 0)}</b></span>
+        <span>Win prob <b>{pct(play.q.prob)}</b></span>
         <span>EV <b className={`ev-text ${plus ? "pos" : ""}`}>{signedPct(play.q.ev)}</b></span>
         {!isYesNo(kind) && <span>Model <b>{fmtProj(kind, mu)}</b> vs line <b>{play.row.line}</b></span>}
       </div>
@@ -324,4 +331,18 @@ function FavButton({ player }: { player: { player_id: string; name: string; pos:
       {problem && <small className="fav-msg" role="status">{problem}</small>}
     </>
   );
+}
+
+interface BoardRow { player_id: string; kind: string; side: string; line: number; book: string; odds: number; prob: number; ev: number; p_model?: number | null; p_mkt?: number | null; w?: number | null }
+/** The board row (Best props, the games' top props, Who's Hot) this play was opened from, if a board on this page has it
+ *  loaded at the same price. */
+function boardRowFor(qc: QueryClient, playerId: string, kind: Kind, c: Cell): BoardRow | undefined {
+  for (const q of qc.getQueryCache().getAll()) {
+    const data = q.state.data;
+    if (!Array.isArray(data)) continue;
+    const hit = (data as Partial<BoardRow>[]).find((r) => r && r.player_id === playerId && r.kind === kind && r.side === c.side && r.line === c.row.line
+      && r.book === c.row.book && r.odds === c.q.odds && typeof r.prob === "number" && typeof r.ev === "number");
+    if (hit) return hit as BoardRow;
+  }
+  return undefined;
 }

@@ -29,7 +29,8 @@ import TopTiles, { type Tile } from "./components/TopTiles";
 import { KIND_LABEL, NBA_KINDS, easternToday, isYesNo, americanOdds, fmtProj, fmtSd, matchup, playLabel, projCaption, signedPct, timeAgo } from "./format";
 import { importOrReload } from "./staleChunk";
 import { localWhen } from "./sync";
-import { filterParams, filtersFromUrl, leaguePath, param, setParams, useSection } from "./route";
+import { filterParams, filtersFromUrl, leaguePath, param, setParams, useDocumentTitle, useSection } from "./route";
+import NotFound from "./components/NotFound";
 import { useDebounced } from "./useDebounced";
 import { useParlayBoard } from "./useParlayBoard";
 import Skeleton from "./components/Skeleton";
@@ -63,7 +64,7 @@ const day = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefine
 
 /** The NBA side: the next two game dates' moneylines, points/rebounds/assists props and projections, and injuries. */
 export default function NbaApp() {
-  const [tab, goSection] = useSection<Tab>(SLUGS, "nba", "games");
+  const [tab, goSection, knownPath] = useSection<Tab>(SLUGS, "nba", "games");
   const [gameId, setGameId] = useState<string | null>(gameFromHash);
   const pushedGame = useRef(false);
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function NbaApp() {
 
   // the drawer and ladder read ["meta"] from the cache, so the NBA meta lives under the same key (this league has its own cache)
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.nbaMeta });
+  useDocumentTitle(!knownPath ? "Page not found" : gameId ? meta.data?.games.find((g) => g.game_id === gameId)?.label : TITLE[tab], "NBA");
   // Model check is the owner's: anyone else following a /nba/model link lands on the games (Admin keeps its own sign-in card)
   const owner = meta.data?.can_write;
   useEffect(() => { if (tab === "check" && owner === false) goSection("games", { replace: true }); }, [tab, owner]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -180,7 +182,7 @@ export default function NbaApp() {
   const hasLines = Object.keys(m.odds).length > 0;
   const hasProps = NBA_KINDS.some((k) => m.odds[k]?.lines);
   const latestOdds = oddsAt;
-  const pricedPage = !!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos";
+  const pricedPage = knownPath && (!!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos");
   const href = (t: Tab) => leaguePath("nba", SLUGS[t]);
   const promoPills = (
     <div className="seg small" role="group" aria-label="Promotion">
@@ -191,7 +193,8 @@ export default function NbaApp() {
 
   return (
     <div className="wrap">
-      <TopBar tabs={orderTabs(m.can_write ? TABS : TABS.filter(([k]) => !OWNER_ONLY.includes(k)), tabOrder)} home="games" more={MORE} tab={tab} onTab={goTab} href={href} />
+      <TopBar tabs={orderTabs(m.can_write ? TABS : TABS.filter(([k]) => !OWNER_ONLY.includes(k)), tabOrder)} home="games" more={MORE} tab={knownPath ? tab : undefined} onTab={goTab} href={href} />
+      <main id="main" tabIndex={-1}>
       <p className="statusline">
         {m.run ? `${seasonLabel} · ${m.run.slate.map(day).join(" & ")} · projections ${timeAgo(m.run.created_at)}` : "No projections yet"}
         {latestOdds && <> · <Freshness at={latestOdds} /></>}
@@ -214,7 +217,7 @@ export default function NbaApp() {
       {openedGame ? (
         <NbaGameOverview key={openedGame.game_id} game={openedGame} books={m.books} book={pageBook} onBook={setGameBook} marketWeight={debounced.marketWeight}
           onBack={() => (pushedGame.current ? window.history.back() : openGame(null))} onSelect={select} />
-      ) : <>
+      ) : !knownPath ? <NotFound home={href("games")} homeLabel="Go to the games" onHome={() => goTab("games")} /> : <>
         <PageHead
           title={tab === "picks" ? <>Best props at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
             : tab === "hot" ? <>Who's Hot at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
@@ -253,6 +256,7 @@ export default function NbaApp() {
       </>}
 
       </div>
+      </main>
 
       <footer>
         Projections and win chances, not betting advice.{m.can_write && tab !== "check" && <> <a href={href("check")} onClick={routeClick(() => goTab("check"))}>How the numbers work →</a></>}

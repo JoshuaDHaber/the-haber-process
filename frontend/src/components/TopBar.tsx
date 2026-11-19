@@ -27,6 +27,7 @@ export default function TopBar<T extends string>({ tabs = [], more = [], tab, on
   const inMore = extra.find(([k]) => k === tab);
   return (
     <>
+    {tabs.length > 0 && <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>Skip to content</a>}
     <header className="topbar">
       <h1 className="brand">
         <a href={home && href ? href(home) : "/"} onClick={home ? routeClick(() => onTab?.(home)) : undefined} aria-label="The Haber Process: home">

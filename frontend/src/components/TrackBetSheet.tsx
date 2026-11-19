@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../auth";
-import { legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, trackBets } from "../bets";
+import { legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, trackBets, type Promo } from "../bets";
 import { namesItself, KIND_SHORT, americanOdds } from "../format";
 import { leaguePath, goToPath } from "../route";
 import { parlay, toWin, type Leg } from "../slip";
@@ -16,8 +16,8 @@ import { openSignIn } from "./SignIn";
 /** "Track this bet" from a slip group: record what was placed at the book (a parlay at the book's price, or each leg as a
  *  single) so it's graded and counted on My bets. Prefilled from the slip; the price is editable since the book's may differ.
  *  Rendered on document.body, above the slip it opens from. */
-export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: slipBonus = false, onClose, onLeave }:
-  { book: string; legs: Leg[]; stake: number; bonus?: boolean; onClose: () => void; /** going to My bets: close the slip under this too */ onLeave: () => void }) {
+export default function TrackBetSheet({ book, legs, stake: slipStake, promo: slipPromo = NO_PROMO, onClose, onLeave }:
+  { book: string; legs: Leg[]; stake: number; /** the promo set on the slip */ promo?: Promo; onClose: () => void; /** going to My bets: close the slip under this too */ onLeave: () => void }) {
   const auth = useAuth();
   const qc = useQueryClient();
   const mixed = new Set(legs.map((l) => legLeague(l))).size > 1;   // a parlay can't span leagues
@@ -28,7 +28,7 @@ export default function TrackBetSheet({ book, legs, stake: slipStake, bonus: sli
   const [problem, setProblem] = useState("");
   const [done, setDone] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
-  const [promo, setPromo] = useState(slipBonus ? { ...NO_PROMO, kind: "bonus" as const } : NO_PROMO);
+  const [promo, setPromo] = useState<Promo>(slipPromo);
   const bonus = promo.kind === "bonus";
   // the tags used before, offered as one-tap suggestions (the same query My bets opens with)
   const ready = !!auth?.user?.age_confirmed;

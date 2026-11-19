@@ -1,21 +1,22 @@
 /* Theme: follows the system unless <html data-theme="light|dark"> is set (see ThemeToggle). */
 :root {
   color-scheme: light dark;
-  /* slate and green, from the equilibrium H icon; --on-acc is text on an --acc/--acc2 fill */
+  /* slate and green, from the equilibrium H icon; --on-acc is text on an --acc fill, --on-acc2 on an --acc2-fill (the brand green,
+     a shade deeper in light mode so white text on it reads at 4.5:1) */
   --bg: #eef2f7; --card: #fff; --ink: #0f172a; --mut: #5b6b80; --line: #e2e8f0;
-  --good: #15803d; --bad: #b42318; --acc: #1e293b; --acc2: #16a34a; --on-acc: #fff; --on-acc2: #fff; --chip: #e8edf3; --warn-bg: #fff4d6; --warn: #6b4e00;
+  --good: #15803d; --bad: #b42318; --acc: #1e293b; --acc2: #16a34a; --acc2-fill: #15803d; --on-acc: #fff; --on-acc2: #fff; --chip: #e8edf3; --warn-bg: #fff4d6; --warn: #6b4e00;
 }
 :root[data-theme="light"] { color-scheme: light; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0b1120; --card: #111a2e; --ink: #e8ecf2; --mut: #94a3b8; --line: #1f2a40;
-    --good: #4ade80; --bad: #f87171; --acc: #e2e8f0; --acc2: #4ade80; --on-acc: #0f172a; --on-acc2: #0f172a; --chip: #1c2638; --warn-bg: #3a2f10; --warn: #f5d98a;
+    --good: #4ade80; --bad: #f87171; --acc: #e2e8f0; --acc2: #4ade80; --acc2-fill: #4ade80; --on-acc: #0f172a; --on-acc2: #0f172a; --chip: #1c2638; --warn-bg: #3a2f10; --warn: #f5d98a;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0b1120; --card: #111a2e; --ink: #e8ecf2; --mut: #94a3b8; --line: #1f2a40;
-  --good: #4ade80; --bad: #f87171; --acc: #e2e8f0; --acc2: #4ade80; --on-acc: #0f172a; --on-acc2: #0f172a; --chip: #1c2638; --warn-bg: #3a2f10; --warn: #f5d98a;
+  --good: #4ade80; --bad: #f87171; --acc: #e2e8f0; --acc2: #4ade80; --acc2-fill: #4ade80; --on-acc: #0f172a; --on-acc2: #0f172a; --chip: #1c2638; --warn-bg: #3a2f10; --warn: #f5d98a;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 "Inter", -apple-system, system-ui, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
@@ -142,7 +143,7 @@ h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; display: flex; a
 .logo { flex: none; border-radius: 8px; box-shadow: 0 4px 12px -4px rgba(15,23,42,.35); } .grad { color: var(--acc2); }
 .card, .chart, .playrow, .slip-group, .ladder { border-radius: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 8px 24px -12px rgba(15,23,42,.12); }
 .card { border-color: color-mix(in srgb, var(--line) 70%, transparent); }
-button.primary, a.primary { background: var(--acc2); color: var(--on-acc2); border-radius: 10px; font-weight: 600; }
+button.primary, a.primary { background: var(--acc2-fill); color: var(--on-acc2); border-radius: 10px; font-weight: 600; }
 select, input[type="search"] { border-radius: 10px; }
 th { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
 tr.clickable { transition: background .12s; }
@@ -376,8 +377,8 @@ table.wx-games td.num, table.wx-games th.num { text-align: right; }
 .inj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 12px; }
 .inj-teams { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
 .inj-team { padding: 10px 14px 12px; min-width: 0; } .inj-team + .inj-team { border-left: 1px solid var(--line); }
-.inj-team h4 { margin: 0; font-size: 15px; } .inj-sum { margin: 2px 0 6px; }
-.inj-team h5 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mut); }
+.inj-team h3 { margin: 0; font-size: 15px; } .inj-sum { margin: 2px 0 6px; }
+.inj-team h4 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mut); }
 .inj-list { list-style: none; margin: 0; padding: 0; }
 .inj-row { display: grid; grid-template-columns: 84px 34px 1fr; gap: 6px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .inj-row:last-child { border-bottom: 0; }
@@ -520,7 +521,8 @@ table.wx-games td.num, table.wx-games th.num { text-align: right; }
 .menu-item { all: unset; box-sizing: border-box; display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px;
   font-size: 14px; color: var(--ink); cursor: pointer; white-space: nowrap; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--chip); }
-.menu-item[aria-checked="true"], .menu-item[aria-current="page"] { font-weight: 600; } .menu-item:disabled { color: var(--mut); cursor: default; }
+.menu-item[aria-pressed="true"], .menu-item[aria-current="page"] { font-weight: 600; } .menu-item.danger { color: var(--bad); }
+.menu-item:focus-visible { outline: 2px solid var(--acc2); outline-offset: -2px; } .menu-item:disabled { color: var(--mut); cursor: default; }
 .menu-check { color: var(--acc2); }
 .state-pop { width: 250px; }
 .state-pop p { margin: 4px 10px 8px; font-size: 12px; color: var(--mut); white-space: normal; } .state-pop p.err { color: var(--bad); }
@@ -623,7 +625,9 @@ input[type="search"] { font-weight: 400; }
 .info-pop { position: fixed; z-index: 40; transform: translateX(-50%); width: min(280px, calc(100vw - 24px)); padding: 10px 12px; border-radius: 10px; background: var(--ink); color: var(--bg);
   font-size: 12px; font-weight: 400; line-height: 1.45; text-transform: none; letter-spacing: 0; text-align: left; white-space: normal; box-shadow: 0 12px 32px -12px rgba(0,0,0,.45); }
 .info-pop b { display: block; margin-bottom: 2px; font-size: 12px; }
-@media (pointer: coarse) { .info-btn { width: 28px; height: 28px; } .chip-x { height: 32px; } }
+/* the ⓘ stays 18px so it doesn't stretch the line it sits in; an invisible ring makes the tap target 24px (32px on touch) */
+.info-btn { position: relative; } .info-btn::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; }
+@media (pointer: coarse) { .info-btn::after { inset: -7px; } .chip-x { height: 32px; } }
 .how-to { position: relative; padding: 14px 44px 12px 16px; margin-bottom: 12px; font-size: 13px; }
 .how-to ol { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--mut); } .how-to ol b { color: var(--ink); }
 .how-to-x { all: unset; position: absolute; top: 8px; right: 8px; display: inline-flex; padding: 6px; border-radius: 8px; color: var(--mut); cursor: pointer; }
@@ -645,7 +649,7 @@ input[type="search"] { font-weight: 400; }
     color: var(--mut); font-size: 11px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .bnav-item.on { color: var(--ink); } .bnav-item:focus-visible { outline: 2px solid var(--acc2); outline-offset: -4px; border-radius: 10px; }
   .bnav-ico { position: relative; display: inline-flex; }
-  .bnav-badge { position: absolute; top: -5px; right: -10px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--acc2); color: var(--on-acc2);
+  .bnav-badge { position: absolute; top: -5px; right: -10px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--acc2-fill); color: var(--on-acc2);
     font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
   .bnav-badge.clash { background: var(--bad); color: #fff; }
   .bnav .menu-pop { min-width: 210px; }
@@ -704,7 +708,13 @@ table, .tile-value, .parlay-odds, .parlay-stats dd, .leg-odds, .pill-count, .cou
 /* a pick the projection seems to argue against, and a winning bet that usually loses: one plain sentence each */
 .pick-why, .wp-note { display: block; max-width: 34ch; margin-top: 4px; font-size: 11.5px; line-height: 1.35; color: var(--warn); }
 .wp-blend { display: block; } .wp-blend .info-btn { vertical-align: -2px; }
-.t-picks .pick-why, .t-picks .wp-note { white-space: normal; min-width: 22ch; }
+.t-picks .pick-why, .t-picks .wp-note { white-space: normal; min-width: 18ch; }
+/* a laptop's 1280px fits every column: the player and pick cells wrap their extras (related, matchup) instead of widening the table */
+@media (min-width: 701px) {
+  .t-picks td:nth-child(1), .t-picks td:nth-child(3), .t-picks td:nth-child(6) { white-space: normal; }
+  .t-picks td:nth-child(1) { min-width: 190px; }
+  .wrap { padding-bottom: 88px; }   /* the last row scrolls clear of the floating Betslip button */
+}
 @media (min-width: 701px) { .t-picks .wp-note { margin-left: auto; } }
 .spark i.hit { background: var(--good); opacity: 1; }
 
@@ -911,7 +921,7 @@ footer a { color: var(--ink); font-weight: 600; text-decoration: none; } footer 
 .auth-age { margin: 0 0 16px; font-weight: 600; }
 
 .acct-avatar { flex: none; border-radius: 50%; object-fit: cover; display: inline-block; }
-.acct-initial { display: inline-flex; align-items: center; justify-content: center; background: var(--acc2); color: var(--on-acc2); font-weight: 700; line-height: 1; }
+.acct-initial { display: inline-flex; align-items: center; justify-content: center; background: var(--acc2-fill); color: var(--on-acc2); font-weight: 700; line-height: 1; }
 .acct-who { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 .acct-who b { font-size: 13px; } .acct-who .mut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
 /* phones: the account control is a round icon (signed out) or avatar (signed in), so the top bar's four controls fit beside the logo */
@@ -954,7 +964,6 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .slip-track .link { font-size: 13px; font-weight: 600; }
 .slip-tracked { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .slip-tracked-actions { display: flex; gap: 16px; flex-wrap: wrap; }
-.slip-total .slip-bonus input { width: auto; padding: 0; margin: 0; accent-color: var(--acc); }
 .track-bonus { align-items: flex-start; margin: 4px 0 2px; } .track-bonus input { margin-top: 2px; flex: none; accent-color: var(--acc); }
 /* a bet's promo (PromoFields): one of none / bonus bet / profit boost / no sweat, with its amount beneath */
 .promo { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px; }
@@ -1086,3 +1095,26 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .add-upload .primary { display: inline-flex; align-items: center; gap: 6px; } .add-upload .mut { font-size: 12px; }
 .add-notes { margin: 0 0 14px; } .add-notes ul { margin: 6px 0 0; padding-left: 18px; } .add-notes li { margin: 2px 0; }
 .add-upload .add-shortcut { flex-basis: 100%; }
+
+/* keyboard users jump past the top bar; hidden until focused. main takes focus from it without a ring around the page */
+.skip-link { position: fixed; z-index: 100; left: 12px; top: 8px; padding: 8px 14px; border-radius: 8px; background: var(--acc); color: var(--on-acc);
+  font-weight: 600; text-decoration: none; transform: translateY(-200%); }
+.skip-link:focus-visible { transform: none; outline: 2px solid var(--acc2); outline-offset: 2px; }
+main:focus { outline: none; }
+/* a custom bet's one leg is what the bettor wrote: no grading mark to make room for, and its odds are in the footer */
+.bet-leg.custom { grid-template-columns: 1fr; }
+/* deleting a bet: asked in the card itself, where the bet is, rather than in a browser dialog */
+.bet-confirm { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--bad) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); }
+.bet-confirm p { margin: 0 0 8px; font-size: 14px; }
+.bet-confirm .bet-edit-row { align-items: center; }
+button.danger-btn { background: var(--bad); color: var(--card); border: 0; padding: 8px 14px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; }
+button.danger-btn:disabled { opacity: .6; cursor: default; }
+button.danger-btn:focus-visible { outline: 2px solid var(--bad); outline-offset: 2px; }
+/* the bet card's header stays one row on a phone: the book's name over what kind of bet it is, the result and ⋯ beside them */
+.bet-head { flex-wrap: nowrap; }
+.bet-book { flex-wrap: nowrap; min-width: 0; }
+.bet-book-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+@media (max-width: 600px) { .bet-book-text { flex-direction: column; align-items: flex-start; line-height: 1.25; } .bet-book .mut { font-size: 12px; } }
+/* the site's own focus ring on text buttons and primary buttons too, not the browser's default */
+.link:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; border-radius: 4px; }
+button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }

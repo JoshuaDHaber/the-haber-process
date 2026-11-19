@@ -5,10 +5,11 @@ import { BASE } from "../env";
 import Sheet from "./Sheet";
 
 // The sign-in sheet opens from anywhere (the top bar, the preferences page, the admin page), so whether it's open lives here.
-let sheet: { error?: string } | null = null;
+let sheet: { error?: string; why?: string } | null = null;
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((l) => l());
-export const openSignIn = (error?: string) => { sheet = { error }; notify(); };
+/** why: what signing in gets them where they opened it ("Track your bets…"), in place of the general line. */
+export const openSignIn = (error?: string, why?: string) => { sheet = { error, why }; notify(); };
 const closeSignIn = () => { sheet = null; notify(); };
 const useSheet = () => useSyncExternalStore((cb) => (listeners.add(cb), () => listeners.delete(cb)), () => sheet);
 
@@ -33,7 +34,7 @@ function useRefetchAccountData() {
   return () => { qc.invalidateQueries({ queryKey: ["meta"] }); qc.invalidateQueries({ queryKey: ["admin"] }); };
 }
 
-function SignInSheet({ error }: { error?: string }) {
+function SignInSheet({ error, why }: { error?: string; why?: string }) {
   const auth = useAuth();
   const refetch = useRefetchAccountData();
   const [email, setEmail] = useState("");
@@ -82,7 +83,7 @@ function SignInSheet({ error }: { error?: string }) {
         </p>
       </> : <>
         <h2>Sign in</h2>
-        <p className="sub auth-lede">Keep your preferences on every device. Every board stays free to browse without an account.</p>
+        <p className="sub auth-lede">{why ?? "Keep your preferences on every device."} Every board stays free to browse without an account.</p>
         {problem && <p className="err auth-problem" role="alert">{problem}</p>}
         {auth?.google && <>
           <a className="auth-google" href={googleHref(next)}><GoogleG />Continue with Google</a>
@@ -141,7 +142,7 @@ export default function AuthLayer() {
     window.history.replaceState(null, "", window.location.pathname + (qs.size ? `?${qs}` : "") + window.location.hash);
     openSignIn(FAILED[why] ?? FAILED.failed);
   }, []);
-  if (open) return <SignInSheet key="signin" error={open.error} />;
+  if (open) return <SignInSheet key="signin" error={open.error} why={open.why} />;
   if (auth?.user && !auth.user.age_confirmed && !ageDismissed) return <AgeGate onDismiss={() => setAgeDismissed(true)} />;
   return null;
 }
