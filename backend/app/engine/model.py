@@ -418,8 +418,10 @@ def _lift_members(members, lost, rho, records=None, t=None, affected=None, only=
                 records.append((kind, lost[key] * vol / active_vol[key], float(c["row"][col]) - vol, t))
             if rho is not None and rho.get(kind, 0.0) > 0:
                 f = rd.lift(kind, rho[kind], lost[key], active_vol[key])
-                mu, v, eff = c["comp"][kind]
-                c["comp"][kind] = (mu * f, v * f, eff)
+                for k in (kind, "recs") if kind == "rec" else (kind,):   # receptions ride the same targets
+                    if k in c["comp"]:
+                        mu, v, eff = c["comp"][k]
+                        c["comp"][k] = (mu * f, v * f, eff)
 
 
 def _apply_redistribution(ctx, logs, priors, opp_cache, spread_map, rho, records):
@@ -431,8 +433,11 @@ def _apply_redistribution(ctx, logs, priors, opp_cache, spread_map, rho, records
     affected = set()
     for (team, t), members in groups.items():
         opp_team, sp = members[0]["opp"], members[0]["sp"]
-        absent = rd.find_absent(logs, team, t, logs.active_at.get(t, set()))
-        if not absent:
+        departed = rd.find_departed(logs, team, t, rd.next_team_this_season(t)) if rho is not None else []
+        gone = {pid for pid, _, _ in departed}
+        # a traded player sitting out his new team's game isn't also an absence here (one hand-off, at the trade share)
+        absent = [a for a in rd.find_absent(logs, team, t, logs.active_at.get(t, set())) if a[0] not in gone]
+        if not absent and not departed:
             continue
 
         def comp_fn(hist, _opp=opp_team, _sp=sp):  # only volume is read from these, so weather doesn't matter
@@ -440,9 +445,12 @@ def _apply_redistribution(ctx, logs, priors, opp_cache, spread_map, rho, records
             hist.attrs["opp"] = _opp
             return components(hist, hist.position.iat[-1], priors, opp_cache[t], _sp)
 
-        lost = rd.lost_volume(absent, comp_fn)
+        lost = rd.lost_volume(absent, comp_fn) if absent else {}
         if lost:
             _lift_members(members, lost, rho, records, t, affected)
+        lost = rd.lost_volume(departed, comp_fn, roles=rd.DEPARTED_RHO) if departed else {}
+        if lost:   # not in records: rho is fit on injury absences only
+            _lift_members(members, lost, rd.DEPARTED_RHO, None, t, affected)
     return affected
 
 
@@ -697,6 +705,11 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
                 lost = rd.lost_volume(absent, comp_fn)
                 if lost:
                     _lift_members(members, lost, rho, only=receivers, lead_pid=starter)
+            # regulars traded away (now on another team's roster): their volume stays here, at the trade share
+            departed = rd.find_departed(logs, team, week_t, lambda pid, _rows: roster.get(pid)) if rho is not None else []
+            lost = rd.lost_volume(departed, comp_fn, roles=rd.DEPARTED_RHO) if departed else {}
+            if lost:
+                _lift_members(members, lost, rd.DEPARTED_RHO, only=receivers)
             if starter is not None and starter not in questionable:
                 # a ruled-out QB stays, so the pipeline lists him among the excluded
                 members = [c for c in members if c["pos"] != "QB" or c["pid"] == starter or c["pid"] in absent_ids]
