@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app import auth, bets, main
 from app.nba import espn
@@ -271,6 +272,9 @@ def test_a_game_off_the_latest_board_is_found_on_the_last_run_that_had_it(sent):
         with SessionLocal() as s:
             for rid in ids:
                 s.delete(s.get(NbaRun, rid))
+            # the late bet stays open on yesterday's date, which sent later grading tests to fetch its player's log
+            for bet in s.scalars(select(Bet).join(BetLeg).where(BetLeg.game_id == old_game)).unique():
+                s.delete(bet)
             s.commit()
 
 
