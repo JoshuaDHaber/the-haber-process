@@ -43,9 +43,12 @@ export function setParams(params: Record<string, string | null | undefined>) {
 /** The section on screen, read from the path, and a way to go to another one (a new history entry, filters and #game cleared). */
 export function useSection<T extends string>(slugs: Record<T, string>, league: League, fallback: T) {
   const fromPath = () => (Object.keys(slugs) as T[]).find((t) => slugs[t] === sectionFromPath()) ?? fallback;
+  // a path that names no section (a typo, an old link): the shell says so instead of quietly showing the fallback
+  const knownPath = () => (Object.values(slugs) as string[]).includes(sectionFromPath());
   const [section, setSection] = useState<T>(fromPath);
+  const [known, setKnown] = useState(knownPath);
   useEffect(() => {
-    const sync = () => setSection(fromPath());
+    const sync = () => { setSection(fromPath()); setKnown(knownPath()); };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -55,8 +58,16 @@ export function useSection<T extends string>(slugs: Record<T, string>, league: L
     const path = leaguePath(league, slugs[t]);
     if (path !== window.location.pathname || window.location.search || window.location.hash) window.history[replace ? "replaceState" : "pushState"](null, "", path);
     setSection(t);
+    setKnown(true);
   };
-  return [section, go] as const;
+  return [section, go, known] as const;
+}
+
+/** The browser tab's title for what's on screen ("Best props · The Haber Process"), so tabs, history and screen readers'
+ *  page announcements tell the sections apart. */
+export function useDocumentTitle(...parts: (string | null | undefined | false)[]) {
+  const title = [...parts.filter(Boolean), "The Haber Process"].join(" · ");
+  useEffect(() => { document.title = title; }, [title]);
 }
 
 export const DEFAULT_FILTERS: Filters = { kind: "all", side: "all", game: "all", book: "all", q: "", minEv: 0.03, marketWeight: null, flagged: false };

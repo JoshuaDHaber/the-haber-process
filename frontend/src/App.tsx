@@ -29,7 +29,8 @@ import TopBar from "./components/TopBar";
 import TopTiles, { type Tile } from "./components/TopTiles";
 import { importOrReload } from "./staleChunk";
 import { localWhen } from "./sync";
-import { filterParams, filtersFromUrl, leaguePath, param, setParams, useSection } from "./route";
+import { filterParams, filtersFromUrl, leaguePath, param, setParams, useDocumentTitle, useSection } from "./route";
+import NotFound from "./components/NotFound";
 import { useBetSlip } from "./BetSlipContext";
 import { useSelectedPlayer } from "./playerHash";
 import Methodology from "./components/Methodology";
@@ -68,7 +69,7 @@ export default function App() {
 }
 
 function PublicApp() {
-  const [tab, goSection] = useSection<Tab>(SLUGS, "nfl", "games");
+  const [tab, goSection, knownPath] = useSection<Tab>(SLUGS, "nfl", "games");
   const [gameId, setGameId] = useState<string | null>(gameFromHash);
   // true while a game page sits on top of the slate in history, so "All games" can go back instead of stacking another entry
   const pushedGame = useRef(false);
@@ -106,6 +107,7 @@ function PublicApp() {
   const [endzoneGame, setEndzoneGame] = useState<string | null>(() => param("promo_game"));
 
   const meta = useQuery({ queryKey: ["meta"], queryFn: api.meta });
+  useDocumentTitle(!knownPath ? "Page not found" : gameId ? meta.data?.games.find((g) => g.game_id === gameId)?.label : TITLE[tab]);
   // Model check is the owner's: anyone else following a /model link lands on the games (Admin keeps its own sign-in card)
   const owner = meta.data?.can_write;
   useEffect(() => { if (tab === "model" && owner === false) goSection("games", { replace: true }); }, [tab, owner]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -191,7 +193,7 @@ function PublicApp() {
   const setDrawerBook = (b: string) => (openedGame ? setGameBook(b) : setFilters({ ...filters, book: b }));
   const hasOdds = Object.keys(m.odds).length > 0;
   const latestOdds = oddsAt;
-  const pricedPage = !!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos";
+  const pricedPage = knownPath && (!!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos");
   const href = (t: Tab) => leaguePath("nfl", SLUGS[t]);
   const promoPills = (
     <div className="seg small" role="group" aria-label="Promotion">
@@ -201,7 +203,8 @@ function PublicApp() {
 
   return (
     <div className="wrap">
-      <TopBar tabs={orderTabs(m.can_write ? TABS : TABS.filter(([k]) => !OWNER_ONLY.includes(k)), tabOrder)} home="games" more={MORE} tab={tab} onTab={goTab} href={href} />
+      <TopBar tabs={orderTabs(m.can_write ? TABS : TABS.filter(([k]) => !OWNER_ONLY.includes(k)), tabOrder)} home="games" more={MORE} tab={knownPath ? tab : undefined} onTab={goTab} href={href} />
+      <main id="main" tabIndex={-1}>
       <p className="statusline">
         {m.run ? `${m.run.season} Week ${m.run.week} · projections ${timeAgo(m.run.created_at)}` : "No projections yet"}
         {latestOdds && <> · <Freshness at={latestOdds} /></>}
@@ -220,7 +223,7 @@ function PublicApp() {
         <GameOverview key={openedGame.game_id} game={openedGame} books={m.books} book={pageBook} onBook={setGameBook} marketWeight={debounced.marketWeight} fit={m.weather}
           onBack={() => (pushedGame.current ? window.history.back() : openGame(null))}
           onSelect={(id, kind, pick) => select({ id, kind, pick })} />
-      ) : <>
+      ) : !knownPath ? <NotFound home={href("games")} homeLabel="Go to this week's games" onHome={() => goTab("games")} /> : <>
       <PageHead title={
         tab === "picks" ? <>Best props at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
           : tab === "hot" ? <>Who's Hot at <BookSelect inline books={m.books} book={filters.book} allLabel="every book" onChange={(b) => setFilters({ ...filters, book: b })} /></>
@@ -256,6 +259,7 @@ function PublicApp() {
       {tab === "bets" && <MyBets />}
       </>}
       </div>
+      </main>
 
       <footer>
         Projections and win chances, not betting advice.{m.can_write && tab !== "model" && <> <a href={href("model")} onClick={routeClick(() => goTab("model"))}>How the numbers work →</a></>}

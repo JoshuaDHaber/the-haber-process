@@ -275,7 +275,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
 
         <div className="track-fields">
           <label className="auth-label">Sportsbook
-            <input className="auth-input" list="add-books" value={book} placeholder="Where you placed it" onChange={(e) => setBook(e.target.value)} maxLength={40} />
+            <input className="auth-input" list="add-books" value={book} placeholder="e.g. FanDuel" onChange={(e) => setBook(e.target.value)} maxLength={40} />
             <datalist id="add-books">{books.map((b) => <option key={b} value={b} />)}</datalist>
           </label>
           <label className="auth-label">Stake<input className="auth-input" inputMode="decimal" value={stake} placeholder="$0" onChange={(e) => setStake(e.target.value)} /></label>

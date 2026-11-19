@@ -2,7 +2,8 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth";
-import { deleteBet, editBet, legLeague, money, trackBets } from "../bets";
+import { boostPct, deleteBet, editBet, legLeague, money, NO_PROMO, promoBody, promoReady, promoReturn, refundOf, trackBets, type Promo, type PromoBody } from "../bets";
+import PromoFields from "./PromoFields";
 import { leaguePath, goToPath } from "../route";
 import { useBetSlip } from "../BetSlipContext";
 import { detectState } from "../geoState";
@@ -37,11 +38,15 @@ export default function BetSlip() {
   const [linking, setLinking] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
-  // books whose stake is a bonus bet (free bet): not the bettor's money, and a win pays only the winnings
-  const [bonus, setBonus] = useState<Record<string, boolean>>({});
+  // each book's promo, as Add a bet and Track this bet take it: a bonus bet (free bet), a profit boost or a no-sweat refund
+  const [promos, setPromos] = useState<Record<string, Promo>>({});
+  const promoFor = (book: string) => promos[book] ?? NO_PROMO;
+  // what "Place bet" records for that promo (a boost or refund still being typed counts once it's complete)
+  const bodyFor = (book: string, stake: number): PromoBody => (promoReady(promoFor(book), stake) ? promoBody(promoFor(book), stake) : { bonus: false, boost: 0, no_sweat: 0 });
+  const sameBody = (a: PromoBody, b: PromoBody) => a.bonus === b.bonus && (a.boost ?? 0) === (b.boost ?? 0) && (a.no_sweat ?? 0) === (b.no_sweat ?? 0);
   // what "Place bet" recorded on My bets, per book: `key` is the legs it was for, so clicking Place again (or after tweaking
   // the stake) doesn't record it twice, while a different set of legs is a new bet
-  const [tracked, setTracked] = useState<Record<string, { key: string; ids: number[]; asParlay: boolean; odds: number; stake: number; bonus: boolean } | { key: string; error: string }>>({});
+  const [tracked, setTracked] = useState<Record<string, { key: string; ids: number[]; asParlay: boolean; odds: number; stake: number; body: PromoBody } | { key: string; error: string }>>({});
   const qc = useQueryClient();
   // some books' links need the bettor's state: find it from the device's location the first time the slip opens
   const locate = async () => {
@@ -125,34 +130,34 @@ export default function BetSlip() {
   const autoTrack = async (book: string) => {
     const ls = groups.find(([b]) => b === book)?.[1] ?? [];
     const stake = stakeFor(book);
-    const key = trackKey(ls), isBonus = !!bonus[book];
+    const key = trackKey(ls), body = bodyFor(book, stake);
     if (!ls.length || !stake || !auth?.user?.age_confirmed || (tracked[book]?.key === key && !("error" in tracked[book]))) return;
     const asParlay = ls.length > 1 && new Set(ls.map((l) => legLeague(l))).size === 1;
     const odds = asParlay ? parlay(ls, 1).american : ls[0].odds;
-    setTracked((t) => ({ ...t, [book]: { key, ids: [], asParlay, odds, stake, bonus: isBonus } }));   // claimed at once, so a second click can't double it
+    setTracked((t) => ({ ...t, [book]: { key, ids: [], asParlay, odds, stake, body } }));   // claimed at once, so a second click can't double it
     try {
-      const saved = await trackBets(book, ls, asParlay, stake, odds, [], { bonus: isBonus });
-      setTracked((t) => ({ ...t, [book]: { key, ids: saved.map((b) => b.id), asParlay, odds, stake, bonus: isBonus } }));
+      const saved = await trackBets(book, ls, asParlay, stake, odds, [], body);
+      setTracked((t) => ({ ...t, [book]: { key, ids: saved.map((b) => b.id), asParlay, odds, stake, body } }));
       qc.invalidateQueries({ queryKey: ["my-bets"] });
     } catch (e) { setTracked((t) => ({ ...t, [book]: { key, error: (e as Error).message } })); }
   };
-  // the stake or Bonus bet changed after "Place bet" recorded it (ticked late, a typo): bring the recorded bet in line
+  // the stake or promo changed after "Place bet" recorded it (ticked late, a typo): bring the recorded bet in line
   useEffect(() => {
-    const due = Object.entries(tracked).flatMap(([book, t]) => ("ids" in t && t.ids.length && (t.stake !== stakeFor(book) || t.bonus !== !!bonus[book]) && stakeFor(book) > 0
-      ? [{ book, t, stake: stakeFor(book), bonus: !!bonus[book] }] : []));
+    const due = Object.entries(tracked).flatMap(([book, t]) => ("ids" in t && t.ids.length && (t.stake !== stakeFor(book) || !sameBody(t.body, bodyFor(book, stakeFor(book)))) && stakeFor(book) > 0
+      ? [{ book, t, stake: stakeFor(book), body: bodyFor(book, stakeFor(book)) }] : []));
     if (!due.length) return;
     const timer = setTimeout(async () => {
-      for (const { book, t, stake, bonus: b } of due) {
+      for (const { book, t, stake, body } of due) {
         try {
-          await Promise.all(t.ids.map((id) => editBet(id, { stake, bonus: b })));
-          setTracked((all) => { const cur = all[book]; return cur && "ids" in cur && cur.ids === t.ids ? { ...all, [book]: { ...cur, stake, bonus: b } } : all; });
+          await Promise.all(t.ids.map((id) => editBet(id, { stake, ...body })));
+          setTracked((all) => { const cur = all[book]; return cur && "ids" in cur && cur.ids === t.ids ? { ...all, [book]: { ...cur, stake, body } } : all; });
         } catch { /* left as recorded: My bets still has it to fix by hand */ }
       }
       qc.invalidateQueries({ queryKey: ["my-bets"] });
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stakes, bonus, tracked]);
+  }, [stakes, promos, tracked]);
   const untrack = async (book: string) => {
     const t = tracked[book];
     if (!t || !("ids" in t)) return;
@@ -337,18 +342,21 @@ export default function BetSlip() {
                             onClick={() => { setStake(book, n); setDrafts(({ [book]: _, ...rest }) => rest); }}>${n}</button>
                         ))}
                       </span>
-                      <label className="check slip-bonus" title="A sportsbook bonus bet (free bet): it isn't your money, so it isn't counted as staked, and a win pays only the winnings">
-                        <input type="checkbox" checked={!!bonus[book]} onChange={(e) => setBonus({ ...bonus, [book]: e.target.checked })} />
-                        Bonus bet
-                      </label>
                     </div>
+                    <PromoFields promo={promoFor(book)} onChange={(pr) => setPromos({ ...promos, [book]: pr })} stake={stake} book={book} compact />
                     {clashBooks.has(book) ? <span className="err">Not a valid parlay yet</span> : !stake ? (
                       <span className="mut">Enter a stake to see {ls.length > 1 ? `the ${ls.length}-leg payout` : "what it pays"}</span>
-                    ) : ls.length > 1 ? (
-                      bonus[book] ? <span>{ls.length}-leg parlay <b>{americanOdds(p.american)}</b> → pays <b>{money(p.profit)}</b> <span className="mut">(a bonus bet's stake isn't returned)</span></span>
-                        : <span>{ls.length}-leg parlay <b>{americanOdds(p.american)}</b> → pays <b>${p.payout.toFixed(2)}</b> (profit ${p.profit.toFixed(2)})</span>
-                    ) : bonus[book] ? <span>Single bet <b>{americanOdds(ls[0].odds)}</b> → pays <b>{money(toWin(ls[0].odds, stake))}</b> <span className="mut">(a bonus bet's stake isn't returned)</span></span>
-                      : <span>Single bet <b>{americanOdds(ls[0].odds)}</b> → pays <b>${(stake + toWin(ls[0].odds, stake)).toFixed(2)}</b></span>}
+                    ) : (() => {
+                      const pr = promoFor(book), boost = boostPct(pr), refund = refundOf(pr, stake), isBonus = pr.kind === "bonus";
+                      const back = promoReturn(stake, ls.length > 1 ? p.profit : toWin(ls[0].odds, stake), pr);
+                      return (
+                        <span aria-live="polite">{ls.length > 1 ? `${ls.length}-leg parlay` : "Single bet"} <b>{americanOdds(ls.length > 1 ? p.american : ls[0].odds)}</b>
+                          {boost && `, boosted ${boost}%`} → pays <b>{money(back)}</b>
+                          {ls.length > 1 && !isBonus && <> (profit {money(back - stake)})</>}
+                          {isBonus && <span className="mut"> (a bonus bet's stake isn't returned)</span>}
+                          {refund && <>, or <b>{money(refund)}</b> back as a bonus bet if it loses</>}</span>
+                      );
+                    })()}
                   </div>
                   {ls.length > 1 && !clashBooks.has(book) && (() => {
                     const sg = sameGame(ls);
@@ -376,7 +384,7 @@ export default function BetSlip() {
                     if (t) return (
                       <div className="slip-track slip-tracked" role="status">
                         <span><span className="pos" aria-hidden>✓</span> {t.ids.length ? "Added" : "Adding"} to My bets: {t.asParlay ? `${ls.length}-leg parlay at ${americanOdds(t.odds)}`
-                          : ls.length > 1 ? `${ls.length} singles` : `single at ${americanOdds(t.odds)}`}, {money(t.stake)}{ls.length > 1 && !t.asParlay ? " each" : ""}{t.bonus ? " bonus bet" : ""}.
+                          : ls.length > 1 ? `${ls.length} singles` : `single at ${americanOdds(t.odds)}`}, {money(t.stake)}{ls.length > 1 && !t.asParlay ? " each" : ""}{t.body.bonus ? " bonus bet" : t.body.boost ? `, boosted ${t.body.boost}%` : t.body.no_sweat ? ", no sweat" : ""}.
                           {t.asParlay && <span className="mut"> If the price at {book} is different, fix it on My bets.</span>}</span>
                         <span className="slip-tracked-actions">
                           <button className="link" disabled={!t.ids.length} onClick={() => untrack(book)}>Didn't place it? Undo</button>
@@ -495,7 +503,7 @@ export default function BetSlip() {
         </Sheet>
       )}
       {open && tracking && groups.some(([b]) => b === tracking) && (
-        <TrackBetSheet book={tracking} legs={groups.find(([b]) => b === tracking)![1]} stake={stakeFor(tracking)} bonus={!!bonus[tracking]} onClose={() => setTracking(null)}
+        <TrackBetSheet book={tracking} legs={groups.find(([b]) => b === tracking)![1]} stake={stakeFor(tracking)} promo={promoFor(tracking)} onClose={() => setTracking(null)}
           onLeave={() => { setTracking(null); close(); }} />
       )}
     </>
