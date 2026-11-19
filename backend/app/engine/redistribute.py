@@ -56,6 +56,11 @@ class Logs:
         self.by_pid = {pid: g.sort_values("t").reset_index(drop=True) for pid, g in df.groupby("player_id")}
         self.pid_t = {pid: g.t.to_numpy() for pid, g in self.by_pid.items()}
         self.active_at = {t: set(g.player_id) for t, g in df.groupby("t")}
+        self._on = {tm: list(g.player_id.unique()) for tm, g in df.groupby("team")}
+
+    def ever_on(self, team: str) -> list:
+        """Everyone with a game for this team."""
+        return self._on.get(team, [])
 
 
 def find_absent(logs: Logs, team: str, t: int, active: set, exclude_roles=()) -> list:
@@ -83,6 +88,60 @@ def find_absent(logs: Logs, team: str, t: int, active: set, exclude_roles=()) ->
     return out
 
 
+# Trades. A regular traded away (or cut and signed elsewhere) is active for his new team, so find_absent never counts
+# him and his old team's projections handed his volume to nobody: IND 2026 week 11, with Josh Downs (KC) and Keenan
+# Allen (SF) gone, projected its remaining receivers for their old depth roles (Laquon Treadwell 2.3 targets, under the
+# volume minimum, so no markets at all) while the books priced him as a starter. Unlike an injury absence, a trade is
+# permanent and the vacated volume has nowhere else to go, so departures get their own share (DEPARTED_RHO, see
+# find_departed), separate from the injury rho that the backtest keeps off for targets.
+# Walk-forward 2024 wk 6 - 2026 wk 10, old teammates of a traded regular (80 receiver-games, 16 back-games):
+#   receiving yards  share 0: bias +11.4, MAE 28.41 | 0.25: +8.3, 28.14 | 0.5: +5.2, 28.42 | 0.75: +2.0, 28.94 | 1: -1.1, 29.59
+#   receptions       share 0: MAE 1.94 | 0.25-0.5: 1.92 | 1: 2.01
+#   rushing yards    share 0: bias +8.0, MAE 20.40 | 0.25: +4.4, 19.77 | 0.5: +0.8, 19.98 | 1: -6.3, 22.86
+# (injury absences: receivers only +2 yards, which is why targets stay off there). 0.4 sits in the flat part of the error
+# curve and halves the bias without overshooting; it matches the injury share applied to carries.
+DEPARTED_RHO = {"rush": 0.4, "rec": 0.4}
+
+
+def find_departed(logs: Logs, team: str, t: int, now_on) -> list:
+    """Players whose last game for this team was earlier this season, within MAX_GAP team games, and who are now with
+    another team (whether or not they have played for it yet: Downs and Allen played week 10 for KC and SF).
+
+    now_on(pid, later) -> the team he is with at t, or None if unknown; later: his rows after that last game here. Live it
+    is the roster, in the backtest the team of his next game that season. Returns find_absent's shape:
+    (pid, his rows through that last game here, team games missed before t)."""
+    games = logs.team_games.get(team)
+    if games is None:
+        return []
+    n = int(np.searchsorted(games, t, side="left"))
+    if n == 0:
+        return []
+    out = []
+    for pid in logs.ever_on(team):
+        g, ts = logs.by_pid[pid], logs.pid_t[pid]
+        here = np.flatnonzero((g.team.to_numpy() == team) & (ts < t))
+        if not len(here):
+            continue
+        k = int(here[-1])
+        if ts[k] // 100 != t // 100:     # left in the offseason: the draft and free agency refill the role
+            continue
+        gap = n - int(np.searchsorted(games, ts[k]))
+        if not 1 <= gap <= MAX_GAP:
+            continue
+        now = now_on(pid, g.iloc[k + 1:])
+        if now is not None and now != team:
+            out.append((pid, g.iloc[: k + 1], gap - 1))
+    return out
+
+
+def next_team_this_season(t: int):
+    """Backtest now_on for find_departed: the team of his next game in t's season (a trade shows up there)."""
+    def now_on(pid, later):
+        later = later[later.t // 100 == t // 100]
+        return None if later.empty else later.team.iat[0]
+    return now_on
+
+
 def group(kind: str, pos: str) -> str:
     """Who competes for the same volume: running backs for carries, receivers for targets, quarterbacks for attempts."""
     if kind == "rush":
@@ -92,15 +151,15 @@ def group(kind: str, pos: str) -> str:
     return "QB"
 
 
-def lost_volume(absent: list, comp_fn) -> dict:
+def lost_volume(absent: list, comp_fn, roles=ROLES) -> dict:
     """{(role, position group): volume the absent regulars would have had, net of what teammates' history already
-    shows}. Volume stays inside the absent player's own position group."""
+    shows}. Volume stays inside the absent player's own position group. roles: the roles counted (default all)."""
     lost = {}
     for pid, hist, missed in absent:
         comp = comp_fn(hist)
         keep = 1.0 - reflected_fraction(missed)
         pos = hist.position.iat[-1]
-        for kind in ROLES:
+        for kind in roles:
             c = comp.get(kind)
             if c and c[1] >= MIN_REGULAR[kind]:
                 key = (kind, group(kind, pos))

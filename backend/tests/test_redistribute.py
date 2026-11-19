@@ -473,3 +473,87 @@ def test_a_qb_cut_is_stored_on_the_receiving_rows_it_touched():
     wr = out[(out.player_id == "wr") & (out.kind == "rec")].iloc[0]
     assert wr.qb_name == "qb3" and wr.qb_adj < 0.95
     assert wr.mu == pytest.approx(wr.vol * wr.eff * wr.qb_adj * wr.wx, rel=0.02)   # the Why panel's steps multiply to mu
+
+
+# ---------- trades: a regular traded away leaves his volume with his old teammates ----------
+def trade_league(aaa_weeks, ccc_weeks=(), weeks=range(1, 9)):
+    """AAA: wr1 (6 targets), wr3 (2: under the volume minimum), a TE (5), a back and a QB; wr2 (8 targets) plays for AAA in
+    aaa_weeks and for CCC in ccc_weeks (traded)."""
+    rows = []
+    for w in weeks:
+        rows += [row("wr1", "WR", w, targets=6), row("wr3", "WR", w, targets=2), row("te", "TE", w, targets=5),
+                 row("rb", "RB", w, carries=15, targets=3), row("qb", "QB", w, attempts=33),
+                 row("cwr", "WR", w, targets=7, team="CCC")]
+        if w in aaa_weeks:
+            rows.append(row("wr2", "WR", w, targets=8))
+        if w in ccc_weeks:
+            rows.append(row("wr2", "WR", w, targets=8, team="CCC"))
+    return model.prep(pd.DataFrame(rows, columns=COLS))
+
+
+def live(df, roster, monkeypatch, dep_rho):
+    monkeypatch.setattr(rd, "DEPARTED_RHO", dep_rho)
+    p = model.upcoming_projections(df, sched(), model.league_priors(df), DIST, 202609, roster,
+                                   rho={"rush": 0.5, "rec": 0.0, "pass": 0.0})
+    return {(r.player_id, r.kind): r.mu for r in p.itertuples()}
+
+
+AAA = {pid: "AAA" for pid in ("wr1", "wr3", "te", "rb", "qb")}
+
+
+def test_live_a_receiver_traded_away_hands_his_targets_to_his_old_position_group(monkeypatch):
+    df = trade_league(aaa_weeks=range(1, 9))                    # wr2 played every AAA game, now on CCC's roster
+    traded = {**AAA, "wr2": "CCC"}
+    off = live(df, traded, monkeypatch, {"rush": 0.0, "rec": 0.0})
+    on = live(df, traded, monkeypatch, {"rush": 0.6, "rec": 1.0})
+    assert on[("wr1", "rec")] > off[("wr1", "rec")] * 1.3
+    assert ("wr3", "rec") not in off and ("wr3", "rec") in on   # the backup clears the volume minimum and gets markets
+    assert ("wr3", "recs") in on and on[("wr1", "recs")] > off[("wr1", "recs")] * 1.3   # receptions follow the targets
+    assert on[("te", "rec")] == pytest.approx(off[("te", "rec")])   # targets stay in the WR group
+
+
+def test_live_a_player_off_every_roster_is_an_absence_not_a_trade(monkeypatch):
+    df = trade_league(aaa_weeks=range(1, 9))
+    hurt = live(df, AAA, monkeypatch, {"rush": 0.6, "rec": 1.0})   # e.g. on injured reserve: no new team
+    off = live(df, AAA, monkeypatch, {"rush": 0.0, "rec": 0.0})
+    assert hurt[("wr1", "rec")] == pytest.approx(off[("wr1", "rec")])   # the injury rho for targets (0) applies
+
+
+def test_find_departed_needs_a_new_team_and_a_recent_game_here():
+    df = trade_league(aaa_weeks=range(1, 9))
+    logs = rd.Logs(df)
+    assert [p for p, _, missed in rd.find_departed(logs, "AAA", 202609, lambda pid, _r: {"wr2": "CCC"}.get(pid, "AAA"))] == ["wr2"]
+    assert rd.find_departed(logs, "AAA", 202609, lambda pid, _r: None) == []                 # unknown: not a trade
+    now = {**AAA, "wr2": "CCC", "cwr": "CCC"}
+    assert rd.find_departed(logs, "CCC", 202609, lambda pid, _r: now.get(pid)) == []        # an arrival isn't gone from CCC
+    old = trade_league(aaa_weeks=range(1, 2), weeks=range(1, 12))                           # gone 10 games: history shows it
+    assert rd.find_departed(rd.Logs(old), "AAA", 202612, lambda pid, _r: {"wr2": "CCC"}.get(pid, "AAA")) == []
+
+
+def test_backtest_hands_a_traded_receivers_targets_to_his_old_teammates_once(monkeypatch):
+    monkeypatch.setattr(rd, "DEPARTED_RHO", {"rush": 0.6, "rec": 1.0})
+    s = sched()
+
+    def mu(frame, pid, t=202606, kind="rec"):
+        return float(frame[(frame.player_id == pid) & (frame.t == t) & (frame.kind == kind)].mu.iloc[0])
+
+    plays = trade_league(aaa_weeks=range(1, 6), ccc_weeks=range(6, 9))     # traded after week 5, plays for CCC at once
+    base = model.walk_forward(plays, model.league_priors(plays), s, 202606)
+    moved = model.walk_forward(plays, model.league_priors(plays), s, 202606, rho={"rush": 0.5, "rec": 0.0, "pass": 0.0})
+    assert mu(moved, "wr1") > mu(base, "wr1") * 1.3
+    assert mu(moved, "te") == pytest.approx(mu(base, "te"))
+    assert mu(moved, "cwr") == pytest.approx(mu(base, "cwr"))            # his new team is untouched
+    # sitting out his new team's first game, he is a trade and not also an absence: the same single hand-off
+    sits = trade_league(aaa_weeks=range(1, 6), ccc_weeks=range(7, 9))
+    moved2 = model.walk_forward(sits, model.league_priors(sits), s, 202606, rho={"rush": 0.5, "rec": 0.0, "pass": 0.0})
+    assert mu(moved2, "wr1") == pytest.approx(mu(moved, "wr1"))
+
+
+def test_live_a_trade_counts_after_he_has_already_played_for_his_new_team(monkeypatch):
+    """IND 2026 week 11: Downs and Allen were traded before week 10 and played it for KC and SF."""
+    df = trade_league(aaa_weeks=range(1, 8), ccc_weeks=range(8, 9))
+    traded = {**AAA, "wr2": "CCC"}
+    off = live(df, traded, monkeypatch, {"rush": 0.0, "rec": 0.0})
+    on = live(df, traded, monkeypatch, {"rush": 0.6, "rec": 1.0})
+    assert on[("wr1", "rec")] > off[("wr1", "rec")] * 1.2
+    assert ("wr2", "rec") not in on                                    # and he is not projected for his old team
