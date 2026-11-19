@@ -74,3 +74,12 @@ def test_a_missing_season_is_skipped_not_fatal(cache, monkeypatch):
     monkeypatch.setattr(data.requests, "get", lambda url, timeout=0: Resp(200, stats.encode()) if "2025" in url else Resp(404))
     df = data.load_stats([2025, 2026])
     assert list(df.player_id) == ["p1"]
+
+
+def test_a_two_way_player_filed_under_defense_takes_his_roster_position(cache, monkeypatch):
+    """Travis Hunter: a CB in the stats file, a WR on JAX's roster."""
+    stats = "player_id,season,week,season_type,position\nhunter,2026,1,REG,CB\nrb,2026,1,REG,RB\ndb,2026,1,REG,CB\n"
+    monkeypatch.setattr(data.requests, "get", lambda url, timeout=0: Resp(200, stats.encode()) if "2026" in url else Resp(404))
+    assert list(data.load_stats([2026]).player_id) == ["rb"]
+    df = data.load_stats([2026], positions={"hunter": "WR", "rb": "FB"})
+    assert dict(zip(df.player_id, df.position)) == {"hunter": "WR", "rb": "RB"}   # an offensive label from the stats file stays
