@@ -52,9 +52,12 @@ PBP_COLUMNS = ["game_id", "play_id", "season", "week", "season_type", "receiver_
                "td_team", "rush_touchdown", "pass_touchdown", "yards_gained", "return_yards", "total_home_score", "total_away_score"]
 
 
-def load_stats(seasons, usecols=None):
+def load_stats(seasons, usecols=None, positions=None):
     """usecols trims the ~150 stat columns when only a few are needed (keeps a small server's memory down).
-    A list is matched by name and tolerates columns a season's file lacks."""
+    A list is matched by name and tolerates columns a season's file lacks.
+
+    positions: gsis_id -> offensive position from the roster (roster_positions). A two-way player the stats file files
+    under defense takes it: Travis Hunter is a CB there and a WR on JAX's roster, so his catches were never loaded."""
     if isinstance(usecols, (list, tuple, set)):
         wanted = set(usecols)
         usecols = lambda c: c in wanted  # noqa: E731
@@ -66,7 +69,10 @@ def load_stats(seasons, usecols=None):
             pass
     df = pd.concat(frames, ignore_index=True)
     df = df[df.season_type == "REG"]
-    return df[df.position.isin(["QB", "RB", "WR", "TE", "FB"])].copy()
+    if positions:
+        listed = df.player_id.map(positions)
+        df = df.assign(position=df.position.where(df.position.isin(OFFENSE) | listed.isna(), listed))
+    return df[df.position.isin(OFFENSE)].copy()
 
 
 def _catches(p):
@@ -274,6 +280,12 @@ def load_espn_injuries(max_age_hours=0.25):
 
 
 OFFENSE = ("QB", "RB", "FB", "WR", "TE")
+
+
+def roster_positions(season) -> dict:
+    """gsis_id -> position for every active offensive skill player (load_active_players). Empty if unavailable."""
+    a = load_active_players(season)
+    return dict(zip(a.player_id, a.pos))
 
 
 def load_active_players(season):

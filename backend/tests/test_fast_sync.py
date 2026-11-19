@@ -79,7 +79,8 @@ def synthetic(monkeypatch):
     stats, sched = league()
     roster = {f"{t}_{r}": t for t in TEAMS for r in ROLES}
     monkeypatch.setattr(pipeline.data, "load_schedule", lambda: sched)
-    monkeypatch.setattr(pipeline.data, "load_stats", lambda seasons, usecols=None: stats)
+    monkeypatch.setattr(pipeline.data, "load_stats", lambda seasons, usecols=None, positions=None: stats)
+    monkeypatch.setattr(pipeline.data, "roster_positions", lambda season: {})
     monkeypatch.setattr(pipeline.data, "load_catches", lambda seasons: catches(stats))
     monkeypatch.setattr(pipeline.data, "load_rushes", lambda seasons: rushes(stats))
     monkeypatch.setattr(pipeline.data, "load_first_tds", lambda seasons: first_tds(stats))

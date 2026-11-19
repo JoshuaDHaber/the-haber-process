@@ -139,6 +139,33 @@ def early_outs(cur_inj: pd.DataFrame, reserve: pd.DataFrame, espn: pd.DataFrame,
     return out
 
 
+def book_starters(passers: dict, games: pd.DataFrame, qbs: pd.DataFrame) -> dict:
+    """team -> player_id of the QB the books expect to start: the only one of his team's QBs with a passing line posted
+    for this week's game. Books post passing yards for the starter alone, and they know about a benching the injury
+    report doesn't show (Joe Milton, PHI 2026 week 11: McKee missed week 9 Questionable, so the start history said he
+    had his job back, but the coach named Milton). passers: game_id -> normalized names with a passing-yards or
+    passing-TD line. qbs: the QBs on each roster (player_id, team, norm)."""
+    out = {}
+    for gm in games.itertuples():
+        names = passers.get(gm.game_id, set())
+        for team in (gm.home_team, gm.away_team):
+            hit = qbs[(qbs.team == team) & qbs.norm.isin(names)].player_id.unique()
+            if len(hit) == 1:
+                out[team] = hit[0]
+    return out
+
+
+def _passers(game_ids) -> dict:
+    """game_id -> normalized names with a stored passing line (the last odds fetch, which runs after the model)."""
+    out = {}
+    with SessionLocal() as s:
+        rows = s.query(OddsLine.game_id, OddsLine.player).filter(OddsLine.game_id.in_(list(game_ids)),
+                                                                   OddsLine.market.in_(["pass", "ptd"])).distinct()
+        for gid, player in rows:
+            out.setdefault(gid, set()).add(odds.norm(player))
+    return out
+
+
 def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log = print, full: bool = False) -> int:
     """Compute projections for the next unplayed week and store them. Returns the run id.
 
@@ -152,7 +179,7 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
     log(f"Target: {season} week {week}")
 
     seasons = [season - 2, season - 1, season]
-    stats = model.prep(data.load_stats(seasons, usecols=data.PIPELINE_COLUMNS))
+    stats = model.prep(data.load_stats(seasons, usecols=data.PIPELINE_COLUMNS, positions=data.roster_positions(season)))
     # play-by-play: catches and carries for the longest reception and rush, each game's first touchdown scorer
     catches, rushes = data.load_catches(seasons), data.load_rushes(seasons)
     stats = model.add_first_td(model.add_longest(stats, catches, rushes), data.load_first_tds(seasons))
@@ -233,11 +260,19 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
     game_weather = wxm.forecast(week_games, wx_coef, log=log)
     outdoor = [w for w in game_weather.values() if w["source"] == "forecast"]
     log(f"  {len(outdoor)} outdoor games forecast, {sum(w['indoor'] for w in game_weather.values())} indoors")
+    roster = data.load_roster(season)
+    qb_rows = latest[(latest.position == "QB") & latest.player_id.isin(roster.keys())]
+    starters = book_starters(_passers(week_games.game_id), week_games,
+                             pd.DataFrame(dict(player_id=qb_rows.player_id, team=qb_rows.player_id.map(roster),
+                                               norm=qb_rows.player_display_name.map(odds.norm))))
+    if starters:
+        log(f"Starting QBs from the posted passing lines: {len(starters)} teams")
     log("Projecting upcoming games...")
-    proj = model.upcoming_projections(stats, sched, priors, var_params, week_t, data.load_roster(season),
+    proj = model.upcoming_projections(stats, sched, priors, var_params, week_t, roster,
                                       td_priors=td_pri, td_scale=td_scale, rho=rho, absent_ids=absent_ids,
                                       game_wx={g: w["factors"] for g, w in game_weather.items()}, ruled_out=ruled_out, sat_out=sat_out,
-                                      questionable={pid for pid, s_ in status.items() if s_ == "Questionable"}, ftd_scale=ftd_scale)
+                                      questionable={pid for pid, s_ in status.items() if s_ == "Questionable"}, ftd_scale=ftd_scale,
+                                      book_starters=starters)
 
     # team win chances: cheap (seconds), so fitted fresh every run, fast or full
     log("Team ratings and win probabilities...")

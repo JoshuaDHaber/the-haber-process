@@ -638,7 +638,7 @@ _LOG_COLUMNS = ["player_id", "season", "week", "season_type", "position", "team"
 
 @lru_cache(maxsize=1)
 def _stats(season: int) -> pd.DataFrame:
-    st = model.prep(data.load_stats([season - 1, season], usecols=_LOG_COLUMNS))
+    st = model.prep(data.load_stats([season - 1, season], usecols=_LOG_COLUMNS, positions=data.roster_positions(season)))
     try:   # longest catch and carry, and the first TD, come from play-by-play; without it those logs are left out
         seasons = [season - 1, season]
         st = model.add_longest(st, data.load_catches(seasons), data.load_rushes(seasons))

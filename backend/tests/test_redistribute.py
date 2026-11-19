@@ -557,3 +557,22 @@ def test_live_a_trade_counts_after_he_has_already_played_for_his_new_team(monkey
     on = live(df, traded, monkeypatch, {"rush": 0.6, "rec": 1.0})
     assert on[("wr1", "rec")] > off[("wr1", "rec")] * 1.2
     assert ("wr2", "rec") not in on                                    # and he is not projected for his old team
+
+
+# ---------- the books' passing line names the starter ----------
+def test_live_the_qb_with_the_books_passing_line_starts_over_the_start_history():
+    """Joe Milton, PHI 2026 week 11: named the starter over McKee, whose injury-week absence made him the history's pick."""
+    df = qb_league(qb1_weeks=range(1, 9), weeks=range(1, 9))
+    df.loc[df.player_id == "qb2", "attempts"] = 18
+    df = model.prep(df.drop(columns="qb_start"))
+    s, pri = sched(), model.league_priors(df)
+    roster = {pid: "AAA" for pid in ("qb1", "qb2", "qb3", "rb", "wr")}
+
+    def qbs(**kw):
+        p = model.upcoming_projections(df, s, pri, DIST, 202609, roster, rho={"rush": 0.5, "rec": 0.0, "pass": 0.0}, **kw)
+        return set(p[p.pos == "QB"].player_id)
+
+    assert qbs() == {"qb1"}
+    assert qbs(book_starters={"AAA": "qb2"}) == {"qb2"}                         # benched: the books know
+    assert qbs(book_starters={"AAA": "qb2"}, absent_ids={"qb2"}) != {"qb2"}       # a stale line for a QB now ruled out
+    assert qbs(book_starters={"BBB": "zz"}) == {"qb1"}                           # another team's line changes nothing

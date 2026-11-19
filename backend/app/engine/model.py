@@ -633,7 +633,8 @@ def prob_over_under(mu, line, var):
 
 
 def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_priors=None, td_scale=1.0, rho=None, absent_ids=(),
-                         game_wx=None, ruled_out=frozenset(), questionable=(), sat_out=frozenset(), ftd_scale=None):
+                         game_wx=None, ruled_out=frozenset(), questionable=(), sat_out=frozenset(), ftd_scale=None,
+                         book_starters=None):
     """Project all active players for games not yet played in the target week.
 
     With rho, volume from absent regulars (ruled out/doubtful via absent_ids, or no longer on the active roster)
@@ -644,6 +645,9 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
     a market, and projecting him split the team's passing between the two. While the starter is listed in
     `questionable`, his backups are kept (and his own past Questionable weeks don't count, as he's not back yet).
     A mid-season arrival who started for his old team can take the job (redistribute.arriving_starter).
+
+    book_starters: team -> the QB the books expect to start (pipeline.book_starters). He wins over the start history
+    when he's a healthy member, as a benching never shows on the injury report.
 
     With ftd_scale (the backtest's first-TD scale), every anytime-TD row gets a first-TD row too.
 
@@ -690,6 +694,8 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
                 n_starts = {pid: int((h.qb_start & (h.t >= season * 100)).sum()) if "qb_start" in h else 0
                             for pid, h in qb_hist.items()}
                 starter = rd.arriving_starter(starter, n_starts, arrivals)
+            if (book_starters or {}).get(team) in qbs:
+                starter = book_starters[team]
             # not absent: healthy members, and anyone active on another team's roster (traded away, not missing)
             active = {pid for pid, tm in roster.items() if not (tm == team and pid in absent_ids)}
             receivers = {c["pid"] for c in members if c["pid"] not in absent_ids}
