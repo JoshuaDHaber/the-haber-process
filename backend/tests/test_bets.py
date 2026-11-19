@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import auth, bets, main
+from app.nba import espn
 from app.db import Bet, BetLeg, NbaProjection, NbaRun, Projection, Run, SessionLocal, User
 
 SOON = (datetime.utcnow() + timedelta(days=3)).date().isoformat()
@@ -381,13 +382,16 @@ def test_moneylines_are_tracked_with_props_and_graded_from_the_final_score(sent)
         assert (s.get(Bet, won).status, s.get(Bet, won).legs[0].actual) == ("won", 7.0)
         assert (s.get(Bet, lost).status, s.get(Bet, lost).legs[0].actual) == ("lost", -7.0)
 
-    day = (date.today() - timedelta(days=1)).isoformat()
+    # the NBA's day is Eastern, as grading runs it (espn.today_et): the runner's date.today() is a day ahead from 8 PM ET in
+    # UTC, which made other tests' open props from "today" look like yesterday's and sent this one to fetch them
+    today = espn.today_et()
+    day = (today - timedelta(days=1)).isoformat()
     nba = tracked([dict(game_id="2098_20981101_BOS_NYK", gameday=day, player_id="NYK", kind="ml", side="Over", line=0.0, odds=-110)],
                   kind="single", odds=-110)
     logs = pd.DataFrame([dict(player_id="77", event_id="e1", season=2099, date=day, team="BOS", opp="NYK", home=False, home_score=101,
                               away_score=99, min=34, pts=20, reb=8, ast=6)])
     with SessionLocal() as s:
-        assert bets.grade_nba(s, logs, date.today(), fetch=lambda *a, **k: pytest.fail("a team isn't a player to fetch")) >= 1
+        assert bets.grade_nba(s, logs, today, fetch=lambda *a, **k: pytest.fail("a team isn't a player to fetch")) >= 1
         assert (s.get(Bet, nba).status, s.get(Bet, nba).legs[0].actual) == ("won", 2.0)
 
 
