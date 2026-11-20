@@ -51,6 +51,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const file = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
+  // a FanDuel share link pasted in: read like shared slip text (the server spots the link: backend share_links)
+  const [link, setLink] = useState("");
+  const linkOk = /fanduel\.com\/addToBetslip\?\S*(shareCode|marketId)/i.test(link);
 
   // a player prop: search, then market, side, line and the price taken; legs collect into a single or a parlay
   const [q, setQ] = useState("");
@@ -180,6 +183,15 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
           <span className="mut">{claude ? "Fills in the bet from your slip for you to check. The image isn't kept."
             : "Fills in the bet from a bet365, FanDuel or DraftKings slip for you to check. The image stays on your device."}</span>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />
+          <form className="add-link" onSubmit={(e) => { e.preventDefault(); if (linkOk) upload(link); }}>
+            <label className="sr-only" htmlFor="add-link">FanDuel share link</label>
+            <input id="add-link" className="auth-input" value={link} placeholder="Or paste a FanDuel share link" autoComplete="off" inputMode="url"
+              aria-invalid={!!link.trim() && !linkOk} aria-describedby={link.trim() && !linkOk ? "add-link-err" : undefined}
+              onChange={(e) => setLink(e.target.value)}
+              onPaste={(e) => { const t = e.clipboardData.getData("text"); if (/fanduel\.com\/addToBetslip/i.test(t)) { e.preventDefault(); setLink(t.trim()); upload(t); } }} />
+            <button type="submit" className="primary outline" disabled={reading || !linkOk}>Read link</button>
+          </form>
+          {link.trim() && !linkOk && <span id="add-link-err" className="err add-link-err">That isn't a FanDuel share link. It looks like sportsbook.fanduel.com/addToBetslip?shareCode=…</span>}
           {IOS && <span className="mut add-shortcut">On iPhone or iPad, <a href={SHORTCUT} target="_blank" rel="noopener noreferrer">add the Shortcut</a> to share a slip here
             straight from your sportsbook app.</span>}
         </div>

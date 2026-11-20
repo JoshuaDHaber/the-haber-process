@@ -63,6 +63,32 @@ describe("the service worker's share hand-off", () => {
   });
 });
 
+describe("a share link shared to the app (FanDuel's share button sends text, not an image)", () => {
+  afterEach(() => { delete (globalThis as { caches?: unknown }).caches; });
+
+  it("keeps the text and link, and My bets takes them as text", async () => {
+    const cache = fakeCaches();
+    const listeners: Record<string, (e: unknown) => void> = {};
+    const self = { location: { origin: "https://process.example" }, registration: { scope: "https://process.example/" },
+      addEventListener: (type: string, fn: (e: unknown) => void) => { listeners[type] = fn; }, skipWaiting() {}, clients: { claim() {} } };
+    new Function("self", readFileSync(new URL("../pwa/sw.js", import.meta.url), "utf8"))(self);
+    const form = new FormData();
+    form.append("text", "Check out my bet on FanDuel Sportsbook!");
+    form.append("url", "https://sportsbook.fanduel.com/addToBetslip?shareCode=Ii1CDAF");
+    let answer: Promise<Response> | undefined;
+    listeners.fetch({ request: new Request("https://process.example/share-slip", { method: "POST", body: form }), respondWith: (p: Promise<Response>) => { answer = p; } });
+    expect((await answer!).status).toBe(303);
+    expect((await cache.match("slip"))?.headers.get("content-type")).toBe("text/plain");
+    expect(await takeSharedSlip()).toBe("Check out my bet on FanDuel Sportsbook!\nhttps://sportsbook.fanduel.com/addToBetslip?shareCode=Ii1CDAF");
+    expect(await takeSharedSlip()).toBeNull();
+  });
+
+  it("is in the manifest's share target", () => {
+    const m = JSON.parse(readFileSync(new URL("../pwa/manifest.webmanifest", import.meta.url), "utf8"));
+    expect(m.share_target.params).toMatchObject({ title: "title", text: "text", url: "url" });
+  });
+});
+
 describe("signed out", () => {
   afterEach(() => { delete (globalThis as { caches?: unknown }).caches; });
   it("can see a shared screenshot is waiting without taking it", async () => {

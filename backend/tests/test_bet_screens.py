@@ -307,3 +307,97 @@ def test_a_14_leg_fanduel_parlay_reads_every_leg(reader):
         ("Dylan Harper", "pra", 22.5),   # Apple's reader puts its price between the title and the market
         ("Austin Reaves", "pr", 21.5), ("Davion Mitchell", "pa", 17.5)]
     assert bets.MAX_LEGS >= 14
+
+
+# ---------- FanDuel share links ----------
+from app import share_links  # noqa: E402
+from app.db import OddsLine  # noqa: E402
+
+
+@pytest.fixture
+def fanduel_lines():
+    """Two FanDuel quotes the odds sync stored, with their betslip links (the ids a share link decodes to)."""
+    now = datetime.utcnow()
+    link = "https://sportsbook.fanduel.com/addToBetslip?marketId=42.111&selectionId={}"
+    with SessionLocal() as s:
+        rows = [OddsLine(fetched_at=now, player="Jaxon Smith-Njigba", market="rec", line=89.5, over_odds=-112.0, under_odds=-118.0,
+                         book="FanDuel", over_link=link.format(501), under_link=link.format(502), game_id=GAME),
+                OddsLine(fetched_at=now, player="Rome Odunze", market="recs", line=3.5, over_odds=150.0, under_odds=-200.0,
+                         book="FanDuel", over_link="https://sportsbook.fanduel.com/addToBetslip?marketId=42.222&selectionId=7",
+                         under_link="https://sportsbook.fanduel.com/addToBetslip?marketId=42.222&selectionId=71", game_id=GAME)]
+        # a moneyline is two rows, each with the other team's pick as its "under" link (as the odds sync stores them)
+        ml = "https://sportsbook.fanduel.com/addToBetslip?marketId=42.333&selectionId={}"
+        rows += [OddsLine(fetched_at=now + timedelta(seconds=1), player="Seattle Seahawks", market="ml", line=0, over_odds=-270.0, under_odds=220.0, book="FanDuel",
+                          over_link=ml.format(1), under_link=ml.format(2), game_id=GAME),
+                 OddsLine(fetched_at=now, player="Chicago Bears", market="ml", line=0, over_odds=220.0, under_odds=-270.0, book="FanDuel",
+                          over_link=ml.format(2), under_link=ml.format(1), game_id=GAME)]
+        s.add_all(rows)
+        s.commit()
+        ids = [r.id for r in rows]
+    yield
+    with SessionLocal() as s:
+        for i in ids:
+            s.delete(s.get(OddsLine, i))
+        s.commit()
+
+
+def fake_fanduel(content, status=200):
+    calls = []
+    def get(url, timeout, headers):
+        calls.append(url)
+        return SimpleNamespace(status_code=status, json=lambda: {"content": content, "customerId": "16330408"})
+    get.calls = calls
+    return get
+
+
+def test_a_share_link_is_found_in_whatever_text_comes_with_it():
+    shared = "https://sportsbook.fanduel.com/addToBetslip?shareCode=Ii1CDAF \n Check out my bet on FanDuel Sportsbook!"
+    assert share_links.find_link(shared) == ("code", "Ii1CDAF")
+    assert share_links.find_link("https://sportsbook.fanduel.com/addToBetslip?marketId[0]=42.1&selectionId[0]=5"
+                                 "&marketId[1]=42.2&selectionId[1]=6") == ("picks", [("42.1", "5"), ("42.2", "6")])
+    assert share_links.find_link("no link here") is None and share_links.find_link("https://fanduel.com.evil.example/?shareCode=abcd") is None
+
+
+def test_a_share_link_reads_each_pick_from_fanduels_stored_lines(fanduel_lines, monkeypatch):
+    get = fake_fanduel([{"marketId": "42.111", "selectionId": "502"}, {"marketId": "42.222", "selectionId": "7"}])
+    monkeypatch.setattr(share_links.requests, "get", get)
+    with SessionLocal() as s:
+        slip = share_links.read("https://sportsbook.fanduel.com/addToBetslip?shareCode=Ii1CDAF", s, datetime.utcnow(), get)
+        d = bet_screens._share_draft(slip, s, datetime.utcnow())
+    assert get.calls == ["https://api.sportsbook.fanduel.com/share-bet/decode-short-url/Ii1CDAF"]
+    assert (d.book, d.kind, d.league, d.stake) == ("FanDuel", "parlay", "nfl", None)
+    assert [(l.graded, l.player.name, l.kind, l.side, l.line, l.odds) for l in d.legs] == [
+        (True, "Jaxon Smith-Njigba", "rec", "Under", 89.5, -118), (True, "Rome Odunze", "recs", "Over", 3.5, 150)]   # 7, not 71
+    assert d.odds == round((1 + 100 / 118) * 2.5 * 100 - 100)
+    assert any("same-game" in n for n in d.notes) and any("stake" in n for n in d.notes)
+    assert "16330408" not in str(d.model_dump())   # the sharer's FanDuel id is never passed on
+
+
+def test_a_pick_the_site_never_loaded_is_named_and_fanduel_failing_says_so(fanduel_lines):
+    get = fake_fanduel([{"marketId": "42.111", "selectionId": "501"}, {"marketId": "42.999", "selectionId": "1"}])
+    with SessionLocal() as s:
+        d = bet_screens._share_draft(share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=abcd1", s, datetime.utcnow(), get),
+                                     s, datetime.utcnow())
+        assert [l.player.name for l in d.legs] == ["Jaxon Smith-Njigba"] and d.odds is None
+        assert "1 of the 2 picks isn't" in d.notes[0]
+        with pytest.raises(share_links.HTTPException) as e:
+            share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=gone1", s, datetime.utcnow(), fake_fanduel([], status=404))
+        assert e.value.status_code == 422
+        with pytest.raises(share_links.HTTPException) as e:
+            share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=busy1", s, datetime.utcnow(), fake_fanduel([], status=403))
+        assert e.value.status_code == 502 and "screenshot" in e.value.detail
+
+
+def test_the_text_endpoint_reads_a_shared_fanduel_link(sent, fanduel_lines, monkeypatch):
+    monkeypatch.setattr(share_links.requests, "get", fake_fanduel([{"marketId": "42.111", "selectionId": "501"}]))
+    with member(sent, "share-link@example.com", "198.51.100.34") as c:
+        d = c.post("/api/me/bets/read-slip-text", json={"text": "https://sportsbook.fanduel.com/addToBetslip?shareCode=Ii1CDAF \n Check out my bet"}).json()
+    assert d["book"] == "FanDuel" and d["kind"] == "single" and d["odds"] == -112
+    assert [(l["graded"], l["player"]["name"], l["line"]) for l in d["legs"]] == [(True, "Jaxon Smith-Njigba", 89.5)]
+
+
+def test_a_shared_moneyline_names_the_team_picked_not_its_opponent(fanduel_lines):
+    with SessionLocal() as s:
+        slip = share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=mlbet", s, datetime.utcnow(),
+                                fake_fanduel([{"marketId": "42.333", "selectionId": "2"}]))
+    assert [(l["player"], l["kind"], l["odds"]) for l in slip["legs"]] == [("Chicago Bears", "ml", 220)]

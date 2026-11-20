@@ -1,0 +1,118 @@
+"""Reading a FanDuel share link (My bets → Add a bet, a pasted link, or text shared to the app): FanDuel's share button
+gives "sportsbook.fanduel.com/addToBetslip?shareCode=…". FanDuel's page decodes the code with an unauthenticated lookup
+that returns each pick's market and selection ids, and nothing else. The odds sync already stores FanDuel's betslip
+links for every line it fetches ("addToBetslip?marketId=42.6…&selectionId=237476"), so each pick is found by its ids
+among those, which says who, which market, which side and line, and FanDuel's price at the last sync.
+
+The lookup isn't a published API: if FanDuel changes or blocks it, reading fails with a message, and a screenshot still
+works. The response also names the sharer's FanDuel customer id; it's never kept or logged.
+"""
+import re
+from datetime import datetime, timedelta
+from typing import Optional
+
+import requests
+from fastapi import HTTPException
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from .db import NbaOddsLine, OddsLine
+
+DECODE = "https://api.sportsbook.fanduel.com/share-bet/decode-short-url/{}"
+SHARE = re.compile(r"sportsbook\.fanduel\.com/addToBetslip\?\S*?\bshareCode=([A-Za-z0-9_-]{4,32})", re.I)
+# a betslip link with the picks in it (as the odds sync stores them, or copied from FanDuel's site): marketId / selectionId
+# pairs, plain or indexed ("marketId[0]=…")
+DIRECT = re.compile(r"sportsbook\.fanduel\.com/addToBetslip\?(\S+)", re.I)
+PAIR = re.compile(r"\bmarketId(?:%5B|\[)?(\d*)(?:%5D|\])?=([\d.]+)", re.I)
+SEL = re.compile(r"\bselectionId(?:%5B|\[)?(\d*)(?:%5D|\])?=(\d+)", re.I)
+# how a leg reads when the site can't grade it (kept in words for marking by hand)
+WORDS = {"pts": "points", "reb": "rebounds", "ast": "assists", "threes": "threes", "pra": "pts + reb + ast", "pr": "pts + reb",
+         "pa": "pts + ast", "stl": "steals", "blk": "blocks", "dd": "double-double", "tpl": "triple-double", "pass": "passing yards",
+         "rush": "rushing yards", "rec": "receiving yards", "recs": "receptions", "rr": "rush + rec yards", "ptd": "passing TDs",
+         "td": "anytime TD", "ftd": "first TD", "lng": "longest reception", "rlng": "longest rush"}
+RECENT_DAYS = 10    # quotes this old or newer: a share is of a bet placed lately
+MAX_PICKS = 25
+
+
+def find_link(text: str) -> Optional[tuple]:
+    """("code", share code) or ("picks", [(market id, selection id), …]) for the first FanDuel betslip link in the text."""
+    m = SHARE.search(text or "")
+    if m:
+        return "code", m.group(1)
+    m = DIRECT.search(text or "")
+    if m:
+        markets = {i or "0": v for i, v in PAIR.findall(m.group(1))}
+        sels = {i or "0": v for i, v in SEL.findall(m.group(1))}
+        picks = [(markets[k], sels[k]) for k in markets if k in sels]
+        if picks:
+            return "picks", picks[:MAX_PICKS]
+    return None
+
+
+def decode(code: str, get=None) -> list:
+    """The picks behind a share code: [(market id, selection id), …]. Raises HTTPException when FanDuel won't say."""
+    get = get or requests.get   # looked up per call, so tests can stand in for FanDuel
+    try:
+        r = get(DECODE.format(code), timeout=8, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+    except requests.RequestException:
+        raise HTTPException(502, "FanDuel didn't answer. Try again in a minute, or upload a screenshot of the slip.")
+    if r.status_code in (400, 404):
+        raise HTTPException(422, "FanDuel doesn't know that share link. Check it's the whole link, or upload a screenshot.")
+    if r.status_code != 200:
+        raise HTTPException(502, "FanDuel wouldn't read that link right now. Upload a screenshot of the slip instead.")
+    try:
+        content = r.json().get("content") or []   # the sharer's customerId is in this response too: deliberately unread
+    except ValueError:
+        raise HTTPException(502, "FanDuel wouldn't read that link right now. Upload a screenshot of the slip instead.")
+    picks = [(str(c.get("marketId", "")), str(c.get("selectionId", ""))) for c in content if isinstance(c, dict)]
+    return [p for p in picks if re.fullmatch(r"[\d.]+", p[0]) and p[1].isdigit()][:MAX_PICKS]
+
+
+def _quote(db: Session, market_id: str, selection_id: str, now: datetime) -> Optional[dict]:
+    """The latest stored FanDuel quote whose betslip link is this pick, as a slip leg (bet_screens.SCHEMA's shape)."""
+    want = re.compile(rf"\bmarketId={re.escape(market_id)}&selectionId={selection_id}(?!\d)")
+    since = now - timedelta(days=RECENT_DAYS)
+    for model in (NbaOddsLine, OddsLine):
+        like = f"%marketId={market_id}&selectionId={selection_id}%"
+        rows = db.scalars(select(model).where(model.book == "FanDuel", model.fetched_at >= since,
+                                              or_(model.over_link.like(like), model.under_link.like(like)))
+                          .order_by(model.fetched_at.desc()).limit(10)).all()
+        for row in rows:
+            over = bool(row.over_link and want.search(row.over_link))
+            if not over and not (row.under_link and want.search(row.under_link)):
+                continue   # a longer selection id that starts the same
+            if row.market == "ml" and not over:
+                continue   # a moneyline's "under" link is the other team's pick: its own row (where it's the over) names it
+            odds = row.over_odds if over else row.under_odds
+            odds = None if odds is None else int(round(odds))
+            side = "Over" if over else "Under"
+            if row.market == "ml":
+                text = f"{row.player} moneyline"
+            else:
+                text = f"{row.player} {side} {row.line:g} {WORDS.get(row.market, row.market)}"
+            return {"player": row.player, "kind": row.market, "side": side, "line": row.line, "odds": odds, "text": text}
+    return None
+
+
+def read(text: str, db: Session, now: datetime, get=None) -> Optional[dict]:
+    """The bet behind a FanDuel link in the text, in bet_screens.SCHEMA's shape (for to_draft), or None if there's no link."""
+    found = find_link(text)
+    if not found:
+        return None
+    picks = decode(found[1], get) if found[0] == "code" else found[1]
+    if not picks:
+        raise HTTPException(422, "That FanDuel link has no picks in it. Upload a screenshot of the slip instead.")
+    legs = [leg for p in picks if (leg := _quote(db, *p, now))]
+    missing = len(picks) - len(legs)
+    odds = None
+    if len(picks) == 1 and legs:
+        odds = legs[0]["odds"]
+    elif legs and not missing and all(leg["odds"] for leg in legs):
+        dec = 1.0
+        for leg in legs:
+            o = leg["odds"]
+            dec *= 1 + o / 100 if o > 0 else 1 + 100 / -o
+        odds = round((dec - 1) * 100) if dec >= 2 else -round(100 / (dec - 1))
+    return {"sportsbook": "FanDuel", "bet_type": "parlay" if len(picks) > 1 else "single", "odds": odds, "stake": None,
+            "bonus_stake": None, "to_return": None, "event": {"teams": [], "starts": None}, "legs": legs,
+            "share": {"picks": len(picks), "missing": missing, "priced_from_legs": len(legs) > 1 and odds is not None}}
