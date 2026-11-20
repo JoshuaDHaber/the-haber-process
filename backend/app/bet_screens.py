@@ -265,8 +265,13 @@ def _share_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
         notes.insert(0, f"{n} of the {info['picks']} picks {'is' if n == 1 else 'are'}n't in the FanDuel lines this site has loaded "
                         f"(an alternate line, say), so {'it' if n == 1 else 'they'} couldn't be filled in. Add {'it' if n == 1 else 'them'} by hand.")
     if info["priced_from_legs"]:
-        notes.append("The parlay's price is each leg's FanDuel price at the last odds update, multiplied: FanDuel prices same-game "
-                     "parlays its own way, so put in the price from your slip.")
+        games = {leg.player.game_id for leg in draft.legs if leg.graded}
+        if len(games) == 1:
+            notes.append("The parlay's price is each leg's FanDuel price at the last odds update, multiplied: FanDuel prices same-game "
+                         "parlays its own way, so put in the price from your slip.")
+        else:
+            notes.append("The parlay's price is each leg's FanDuel price at the last odds update, multiplied: check it against your slip, "
+                         "since prices move.")
     elif draft.legs:
         notes.append("Prices are FanDuel's at the last odds update: check them against your slip.")
     if not draft.legs:
