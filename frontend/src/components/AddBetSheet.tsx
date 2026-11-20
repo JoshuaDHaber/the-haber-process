@@ -193,7 +193,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
           </form>
           {link.trim() && !linkOk && <span id="add-link-err" className="err add-link-err">That isn't a FanDuel share link. It looks like sportsbook.fanduel.com/addToBetslip?shareCode=…</span>}
           {IOS && <span className="mut add-shortcut">On iPhone or iPad, <a href={SHORTCUT} target="_blank" rel="noopener noreferrer">add the Shortcut</a> to share a slip here
-            straight from your sportsbook app.</span>}
+            straight from your sportsbook app: a screenshot, or FanDuel's share link.</span>}
         </div>
       )}
       {notes.length > 0 && (
