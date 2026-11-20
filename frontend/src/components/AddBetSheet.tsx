@@ -22,7 +22,7 @@ function nextHour() {
 }
 // The Shortcut's iCloud link (pwa/add-slip.shortcut, shared from Shortcuts): it opens the Shortcuts app from anywhere,
 // including the app added to the home screen, which can't download the file itself
-const SHORTCUT = "https://www.icloud.com/shortcuts/a9dc570e389a45c5bb4ad90aaf9ff9a9";
+const SHORTCUT = "https://www.icloud.com/shortcuts/6c9e1cd889ae488f86da0348139b4d1a";
 // an iPhone or iPad (iPadOS reports itself as a Mac with touch): it can't share to a web app, but the Shortcut can
 const IOS = typeof navigator !== "undefined" && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1));
 /** The parlay price its legs make together, when every leg's own price is known (most slips show only the parlay's). */
