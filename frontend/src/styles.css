@@ -1088,6 +1088,7 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .add-results .menu-item { white-space: normal; text-align: left; } .add-results > p { margin: 8px 10px; }
 .add-player { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--chip); }
 .add-player .link { font-size: 13px; font-weight: 600; flex: none; }
+.track-legs li > span > .mut { white-space: nowrap; }   /* "3-pointers made" never breaks at its hyphen */
 .add-leg-end { display: inline-flex; align-items: center; gap: 6px; } .add-leg-x { width: 28px; height: 28px; }
 .track-fields .seg { margin: 0; padding-bottom: 0; } .track-fields select { height: 40px; width: 100%; }
 @media (max-width: 700px) { .bets-add { margin-left: 0; } }

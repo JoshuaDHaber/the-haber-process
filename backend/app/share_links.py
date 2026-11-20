@@ -1,8 +1,8 @@
 """Reading a FanDuel share link (My bets → Add a bet, a pasted link, or text shared to the app): FanDuel's share button
 gives "sportsbook.fanduel.com/addToBetslip?shareCode=…". FanDuel's page decodes the code with an unauthenticated lookup
 that returns each pick's market and selection ids, and nothing else. The odds sync already stores FanDuel's betslip
-links for every line it fetches ("addToBetslip?marketId=42.6…&selectionId=237476"), so each pick is found by its ids
-among those, which says who, which market, which side and line, and FanDuel's price at the last sync.
+links for every line it fetches, main and alternate ("addToBetslip?marketId=42.6…&selectionId=237476"), so each pick is
+found by its ids among those, which says who, which market, which side and line, and FanDuel's price at the last sync.
 
 The lookup isn't a published API: if FanDuel changes or blocks it, reading fails with a message, and a screenshot still
 works. The response also names the sharer's FanDuel customer id; it's never kept or logged.
@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .db import NbaOddsLine, OddsLine
+from .db import AltLine, NbaAltLine, NbaOddsLine, OddsLine
 
 DECODE = "https://api.sportsbook.fanduel.com/share-bet/decode-short-url/{}"
 SHARE = re.compile(r"sportsbook\.fanduel\.com/addToBetslip\?\S*?\bshareCode=([A-Za-z0-9_-]{4,32})", re.I)
@@ -68,30 +68,44 @@ def decode(code: str, get=None) -> list:
     return [p for p in picks if re.fullmatch(r"[\d.]+", p[0]) and p[1].isdigit()][:MAX_PICKS]
 
 
-def _quote(db: Session, market_id: str, selection_id: str, now: datetime) -> Optional[dict]:
-    """The latest stored FanDuel quote whose betslip link is this pick, as a slip leg (bet_screens.SCHEMA's shape)."""
-    want = re.compile(rf"\bmarketId={re.escape(market_id)}&selectionId={selection_id}(?!\d)")
+# where the picks are looked for, in order: the main lines, then the alternate lines (a "3+ threes" pick is an alternate
+# line, and FanDuel lists every player of a game in one alternate market, each a selection of it)
+TABLES = (NbaOddsLine, OddsLine, NbaAltLine, AltLine)
+
+
+def _leg(row, over: bool) -> dict:
+    """A stored quote, from the side whose link is the pick, as a slip leg (bet_screens.SCHEMA's shape)."""
+    odds = row.over_odds if over else row.under_odds
+    side = "Over" if over else "Under"
+    text = f"{row.player} moneyline" if row.market == "ml" else f"{row.player} {side} {row.line:g} {WORDS.get(row.market, row.market)}"
+    return {"player": row.player, "kind": row.market, "side": side, "line": row.line,
+            "odds": None if odds is None else int(round(odds)), "text": text}
+
+
+def _quotes(db: Session, picks: list, now: datetime) -> dict:
+    """Each pick's latest stored FanDuel quote whose betslip link is that pick, as a slip leg: {(market, selection): leg}.
+    One pass per table for all the picks still unfound (the alternate tables are large and indexed only by game)."""
     since = now - timedelta(days=RECENT_DAYS)
-    for model in (NbaOddsLine, OddsLine):
-        like = f"%marketId={market_id}&selectionId={selection_id}%"
+    found: dict = {}
+    for model in TABLES:
+        todo = [p for p in picks if p not in found]
+        if not todo:
+            break
+        likes = [f"%marketId={m}&selectionId={sel}%" for m, sel in todo]
         rows = db.scalars(select(model).where(model.book == "FanDuel", model.fetched_at >= since,
-                                              or_(model.over_link.like(like), model.under_link.like(like)))
-                          .order_by(model.fetched_at.desc()).limit(10)).all()
-        for row in rows:
-            over = bool(row.over_link and want.search(row.over_link))
-            if not over and not (row.under_link and want.search(row.under_link)):
-                continue   # a longer selection id that starts the same
-            if row.market == "ml" and not over:
-                continue   # a moneyline's "under" link is the other team's pick: its own row (where it's the over) names it
-            odds = row.over_odds if over else row.under_odds
-            odds = None if odds is None else int(round(odds))
-            side = "Over" if over else "Under"
-            if row.market == "ml":
-                text = f"{row.player} moneyline"
-            else:
-                text = f"{row.player} {side} {row.line:g} {WORDS.get(row.market, row.market)}"
-            return {"player": row.player, "kind": row.market, "side": side, "line": row.line, "odds": odds, "text": text}
-    return None
+                                              or_(*(model.over_link.like(x) for x in likes), *(model.under_link.like(x) for x in likes)))
+                          .order_by(model.fetched_at.desc())).all()
+        for m, sel in todo:
+            want = re.compile(rf"\bmarketId={re.escape(m)}&selectionId={sel}(?!\d)")   # not a longer id that starts the same
+            for row in rows:   # newest first
+                over = bool(row.over_link and want.search(row.over_link))
+                if not over and not (row.under_link and want.search(row.under_link)):
+                    continue
+                if row.market == "ml" and not over:
+                    continue   # a moneyline's "under" link is the other team's pick: its own row (where it's the over) names it
+                found[(m, sel)] = _leg(row, over)
+                break
+    return found
 
 
 def read(text: str, db: Session, now: datetime, get=None) -> Optional[dict]:
@@ -102,7 +116,8 @@ def read(text: str, db: Session, now: datetime, get=None) -> Optional[dict]:
     picks = decode(found[1], get) if found[0] == "code" else found[1]
     if not picks:
         raise HTTPException(422, "That FanDuel link has no picks in it. Upload a screenshot of the slip instead.")
-    legs = [leg for p in picks if (leg := _quote(db, *p, now))]
+    quotes = _quotes(db, picks, now)
+    legs = [quotes[p] for p in picks if p in quotes]
     missing = len(picks) - len(legs)
     odds = None
     if len(picks) == 1 and legs:

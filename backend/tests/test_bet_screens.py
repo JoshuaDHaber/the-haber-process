@@ -401,3 +401,29 @@ def test_a_shared_moneyline_names_the_team_picked_not_its_opponent(fanduel_lines
         slip = share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=mlbet", s, datetime.utcnow(),
                                 fake_fanduel([{"marketId": "42.333", "selectionId": "2"}]))
     assert [(l["player"], l["kind"], l["odds"]) for l in slip["legs"]] == [("Chicago Bears", "ml", 220)]
+
+
+def test_alternate_line_picks_are_found_and_each_names_its_own_player():
+    """FanDuel lists a game's "3+ threes" as one alternate market, every player a selection of it: the pick is the player
+    whose own link it is, and picks on main and alternate lines mix in one bet."""
+    from app.db import NbaAltLine
+    now = datetime.utcnow()
+    alt = "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627004406&selectionId={}"
+    with SessionLocal() as s:
+        rows = [NbaAltLine(fetched_at=now, game_id="2027_20261120_CHA_ATL", player=name, market="threes", line=2.5, over_odds=odds,
+                           under_odds=None, book="FanDuel", over_link=alt.format(sel))
+                for name, sel, odds in [("Coby White", 581301, 144.0), ("Brandon Miller", 58130173, -146.0), ("Naz Reid", 5813017, 108.0)]]
+        rows.append(OddsLine(fetched_at=now, player="Jaxon Smith-Njigba", market="rec", line=89.5, over_odds=-112.0, under_odds=-118.0,
+                             book="FanDuel", over_link="https://sportsbook.fanduel.com/addToBetslip?marketId=42.5&selectionId=1", game_id=GAME))
+        s.add_all(rows)
+        s.commit()
+        try:
+            slip = share_links.read("sportsbook.fanduel.com/addToBetslip?shareCode=alts1", s, now,
+                                    fake_fanduel([{"marketId": "42.627004406", "selectionId": "58130173"}, {"marketId": "42.5", "selectionId": "1"}]))
+        finally:
+            for r in rows:
+                s.delete(r)
+            s.commit()
+    assert [(l["player"], l["kind"], l["side"], l["line"], l["odds"]) for l in slip["legs"]] == [
+        ("Brandon Miller", "threes", "Over", 2.5, -146), ("Jaxon Smith-Njigba", "rec", "Over", 89.5, -112)]
+    assert slip["share"]["missing"] == 0
