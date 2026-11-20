@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from . import auth, config, slip_text
+from . import auth, config, share_links, slip_text
 from .bets import ML, NBA_KINDS, recent_players, recent_teams, require_member, upcoming_players, upcoming_teams
 from .db import User
 from .engine import odds
@@ -254,11 +254,37 @@ def read_screenshot(body: ScreenIn, user: User = Depends(require_member), db: Se
     return to_draft(read_slip(media_type, data), db, datetime.utcnow())
 
 
+def _share_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
+    """A FanDuel share link's bet as a draft: the picks found among FanDuel's stored lines, matched to the board as usual,
+    with notes saying what the link couldn't carry (the stake, any pick the site never loaded, a parlay's own price)."""
+    info = slip.pop("share")
+    draft = to_draft(slip, db, now)
+    notes = [n for n in draft.notes if "stake" not in n and "odds" not in n]   # a link never carries them: said below instead
+    if info["missing"]:
+        n = info["missing"]
+        notes.insert(0, f"{n} of the {info['picks']} picks {'is' if n == 1 else 'are'}n't in the FanDuel lines this site has loaded "
+                        f"(an alternate line, say), so {'it' if n == 1 else 'they'} couldn't be filled in. Add {'it' if n == 1 else 'them'} by hand.")
+    if info["priced_from_legs"]:
+        notes.append("The parlay's price is each leg's FanDuel price at the last odds update, multiplied: FanDuel prices same-game "
+                     "parlays its own way, so put in the price from your slip.")
+    elif draft.legs:
+        notes.append("Prices are FanDuel's at the last odds update: check them against your slip.")
+    if not draft.legs:
+        notes.append("None of the link's picks are in the FanDuel lines this site has loaded. Upload a screenshot of the slip instead.")
+    notes.append("A share link doesn't include the stake: enter it before saving.")
+    draft.notes = notes
+    return draft
+
+
 @router.post("/bets/read-slip-text", response_model=ScreenDraft, dependencies=[Depends(auth.same_origin)])
 def read_slip_text(body: SlipTextIn, user: User = Depends(require_member), db: Session = Depends(auth.get_db)):
-    """A draft bet from the text of a slip screenshot, read by OCR in the browser (free; used when Claude isn't set up).
-    Nothing is saved here."""
-    draft = to_draft(slip_text.parse(body.text), db, datetime.utcnow())
+    """A draft bet from the text of a slip screenshot, read by OCR in the browser (free; used when Claude isn't set up), or
+    from a FanDuel share link in the text (pasted, or shared to the app). Nothing is saved here."""
+    now = datetime.utcnow()
+    shared = share_links.read(body.text, db, now)
+    if shared is not None:
+        return _share_draft(shared, db, now)
+    draft = to_draft(slip_text.parse(body.text), db, now)
     if not draft.legs:
         draft.notes = ["Couldn't find the bet's legs in that screenshot. Reading works with bet365, FanDuel and DraftKings slips; for "
                        "others, add the bet by hand."]

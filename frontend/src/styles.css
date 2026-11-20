@@ -1095,6 +1095,8 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .add-upload .primary { display: inline-flex; align-items: center; gap: 6px; } .add-upload .mut { font-size: 12px; }
 .add-notes { margin: 0 0 14px; } .add-notes ul { margin: 6px 0 0; padding-left: 18px; } .add-notes li { margin: 2px 0; }
 .add-upload .add-shortcut { flex-basis: 100%; }
+.add-link { display: flex; gap: 8px; flex-basis: 100%; } .add-link .auth-input { flex: 1; min-width: 0; height: 40px; }
+.add-link .primary { flex: none; } .add-link-err { flex-basis: 100%; font-size: 12px; }
 
 /* keyboard users jump past the top bar; hidden until focused. main takes focus from it without a ring around the page */
 .skip-link { position: fixed; z-index: 100; left: 12px; top: 8px; padding: 8px 14px; border-radius: 8px; background: var(--acc); color: var(--on-acc);

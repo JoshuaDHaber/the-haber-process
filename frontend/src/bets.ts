@@ -188,6 +188,7 @@ export async function takeSharedSlip(keep = false): Promise<File | string | null
     const fresh = Date.now() - Number(res.headers.get("x-at") ?? 0) <= 3600_000;
     if (!keep || !fresh) await c.delete("slip");
     if (!fresh) return null;
+    if (res.headers.get("content-type") === "text/plain") return await res.text();   // shared text, such as a FanDuel share link
     return new File([await res.blob()], decodeURIComponent(res.headers.get("x-name") ?? "slip"), { type: res.headers.get("content-type") ?? "image/png" });
   } catch { return null; }
 }

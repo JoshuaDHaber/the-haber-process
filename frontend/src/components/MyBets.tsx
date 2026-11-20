@@ -226,7 +226,7 @@ export default function MyBets() {
     try { localStorage.setItem(VIEW_KEY, JSON.stringify(clean)); } catch { /* private mode: not remembered */ }
   };
   const user = auth?.user;
-  // a slip screenshot shared to the app from a sportsbook's share menu: opens in Add a bet once they're signed in
+  // a slip (screenshot or share link) shared to the app from a sportsbook's share menu: opens in Add a bet once they're signed in
   useEffect(() => {
     if (!auth) return;
     if (!user?.age_confirmed) { takeSharedSlip(true).then((f) => setSharedWaiting(!!f)); return; }
@@ -246,7 +246,7 @@ export default function MyBets() {
   if (!user) return (
     <div className="card prefs-card bets-intro">
       <h3 className="sub-h">Track the bets you place</h3>
-      {sharedWaiting && <p className="banner">Sign in and the screenshot you shared opens in Add a bet.</p>}
+      {sharedWaiting && <p className="banner">Sign in and the slip you shared opens in Add a bet.</p>}
       <p className="mut">Keep a record of every bet you place: track one from the betslip, or add one you placed anywhere (a screenshot of the
         slip fills it in). Player props are graded from the box scores, and bonus bets, profit boosts and no-sweat refunds count the way the
         book pays them. Your record, profit and ROI build up here, by league, sportsbook and your own tags. Only you can see them.</p>
