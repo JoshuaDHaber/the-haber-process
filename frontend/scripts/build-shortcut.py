@@ -1,4 +1,4 @@
-"""Builds pwa/add-slip.shortcut, the iPhone Shortcut "Add to The Haber Process". It's in the share menu for screenshots,
+"""Builds pwa/add-slip.shortcut, the iPhone Shortcut "Add Link or Img to The Haber Process". It's in the share menu for screenshots,
 links and text. A screenshot's text is read on the phone (Apple's Extract Text from Image); a link or text, such as
 FanDuel's "Check out my bet" share, is passed on as it is (the server reads a FanDuel share link: backend share_links).
 Either way it opens My bets with it (/bets#slip=<text>), where Add a bet fills in from it (frontend bets.holdSharedText).
@@ -10,7 +10,10 @@ Rebuild (on a Mac signed in to iCloud) when the site's address or these steps ch
 "anyone" signing carries an anonymous Apple certificate ID, not the signer's name or Apple ID.
 
 Add a bet links to the Shortcut's iCloud link (AddBetSheet SHORTCUT), not the file: after a rebuild, add the new file in
-Shortcuts on a Mac (open it in the Shortcuts app), then Share → Copy iCloud Link, and put that link in SHORTCUT."""
+Shortcuts on a Mac, then Share → Copy iCloud Link, and put that link in SHORTCUT. Shortcuts names an imported Shortcut after
+its file, not WFWorkflowName, and that name is what the share menu shows: open a copy named for it, replacing the old one:
+    cp pwa/add-slip.shortcut "/tmp/Add Link or Img to The Haber Process.shortcut" && open -a Shortcuts "/tmp/Add Link or Img to The Haber Process.shortcut"
+"""
 import plistlib, sys, uuid
 site = sys.argv[1]
 new = lambda: str(uuid.uuid4()).upper()  # noqa: E731
@@ -22,7 +25,7 @@ def text_of(u, name): return {"Value": {"string": "￼", "attachmentsByRange": {
 SHARED = {"Value": {"Type": "ExtensionInput"}, "WFSerializationType": "WFTextTokenAttachment"}
 wf = {
     "WFWorkflowClientVersion": "2607.0.2", "WFWorkflowMinimumClientVersion": 900, "WFWorkflowMinimumClientVersionString": "900",
-    "WFWorkflowName": "Add to The Haber Process",
+    "WFWorkflowName": "Add Link or Img to The Haber Process",
     "WFWorkflowIcon": {"WFWorkflowIconStartColor": 463140863, "WFWorkflowIconGlyphNumber": 59511},
     "WFWorkflowTypes": ["ActionExtension"],
     "WFWorkflowInputContentItemClasses": ["WFImageContentItem", "WFURLContentItem", "WFStringContentItem", "WFRichTextContentItem"],

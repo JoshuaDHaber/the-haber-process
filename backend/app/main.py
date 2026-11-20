@@ -826,7 +826,7 @@ if os.path.isdir(config.FRONTEND_DIST):
         """The iPhone Shortcut (frontend/pwa/add-slip.shortcut), as a download (Content-Disposition: attachment) so Safari
         offers it to Shortcuts instead of showing the file as text."""
         return FileResponse(os.path.join(config.FRONTEND_DIST, "add-slip.shortcut"), media_type="application/octet-stream",
-                            filename="Add to The Haber Process.shortcut")
+                            filename="Add Link or Img to The Haber Process.shortcut")
 
     @app.post("/share-slip", include_in_schema=False)
     def share_slip():
