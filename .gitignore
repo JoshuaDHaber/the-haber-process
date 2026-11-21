@@ -1,5 +1,5 @@
 .env
-.venv/
+.venv*/
 .cache/
 __pycache__/
 .tools/
@@ -9,3 +9,6 @@ backend/data/
 *.db
 .pytest_cache/
 *.tsbuildinfo
+
+# Tesseract OCR language data (downloaded at runtime)
+eng.traineddata
