@@ -9,7 +9,7 @@ import { sidePick } from "../moneyline";
 import { checkBack, localWhen } from "../sync";
 import { useSort } from "../useSort";
 import { BookName } from "./BookBadge";
-import EmptyState from "./EmptyState";
+import EmptyState, { LoadError } from "./EmptyState";
 import HowToRead from "./HowToRead";
 import Info from "./Info";
 import { MoneylineAdd } from "./Moneylines";
@@ -52,7 +52,8 @@ export default function TokenBoard({ book, marketWeight, gameIds, pills, nextUpd
   const { sorted, toggle, arrow } = useSort(rows, "ev");
   // the lead picker and primer explain columns, so they come with the rows: an empty board leads with its message, and a
   // cold load doesn't show them only to take them away
-  const empty = !q.isLoading && !q.error && !sorted.length;
+  const failed = !!q.error && !q.data;
+  const empty = !q.isLoading && !failed && !sorted.length;
   const hasRows = sorted.length > 0;
   return (
     <>
@@ -71,7 +72,7 @@ export default function TokenBoard({ book, marketWeight, gameIds, pills, nextUpd
           <li><b>Model ≠ market</b> marks a game where the team model and the books disagree by {Math.round(SPLIT * 100)}+ points, usually {news}. Check the news before trusting either.</li>
         </ol>
       </HowToRead>}
-      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load the moneylines.</p> : empty ? (
+      {q.isLoading ? <Skeleton kind="rows" /> : failed ? <LoadError what="the early-win board" retry={q.refetch} /> : empty ? (
         unpriced.length ? (
           <EmptyState icon={IconClock} title={`${slatePhrase(unpriced.map((g) => g.gameday))} ${unpriced.length === 1 ? "isn't" : "aren't"} priced yet`}
             preview={unpriced} columns={["Spread", `Up ${lead}`, "Token EV"]} league={league}>

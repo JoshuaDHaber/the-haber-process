@@ -26,7 +26,7 @@ import ParlayTiles from "./components/ParlayTiles";
 import PicksTable from "./components/PicksTable";
 import PlayerCompare from "./components/PlayerCompare";
 import ProjectionsTable from "./components/ProjectionsTable";
-import EmptyState from "./components/EmptyState";
+import EmptyState, { LoadError } from "./components/EmptyState";
 import KingBoard from "./components/KingBoard";
 import TokenBoard from "./components/TokenBoard";
 import TopTiles, { type Tile } from "./components/TopTiles";
@@ -246,20 +246,20 @@ export default function NbaApp() {
         {tab === "games" && <Games games={dateGames} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} nextUpdate={nextUpdate} />}
         {(tab === "picks" || tab === "projections" || tab === "hot") && <Controls filters={filters} onChange={setFilters} games={dateGames} showPickControls={tab === "picks"} allMarkets={tab === "hot" ? "All markets" : undefined} />}
       {tab === "picks" && !!picks.data?.length && <HowToRead />}
-        {tab === "picks" && (picks.isLoading ? <Skeleton kind="rows" /> :
-          <PicksTable picks={picks.data ?? []} filters={filters} onFilters={setFilters} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
+        {tab === "picks" && (picks.isLoading ? <Skeleton kind="rows" /> : picks.error && !picks.data ? <LoadError what="best props" retry={picks.refetch} /> :
+          <PicksTable picks={picks.data ?? []} busy={picks.isPlaceholderData} filters={filters} onFilters={setFilters} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
         {tab === "hot" && <HotBoard board={hot} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />}
         {tab === "promos" && (promo === "king"
           ? <KingBoard gameday={date === "all" ? undefined : date} book={debounced.book} pills={promoPills} games={dateGames} nextUpdate={nextUpdate}
             onSelect={(pid, p) => select(pid, "pra", p ? { side: p.side, line: p.line, book: p.book } : undefined)} />
           : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} pills={promoPills} nextUpdate={nextUpdate} />)}
-        {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> :
+        {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> : board.failed ? <LoadError what="parlays" retry={board.retry} /> :
           <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={dateGames} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays}
             tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={select} />)}
-        {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <p className="err">Couldn't load the injury report.</p> :
+        {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <LoadError what="the injury report" retry={injuries.refetch} /> :
           <NbaInjuries report={injuries.data} games={dateGames} onSelect={select} />)}
-        {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> :
-          <ProjectionsTable nba rows={projections.data ?? []} filters={filters} onSelect={(p) => select(p.player_id, p.kind)} />)}
+        {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> : projections.error && !projections.data ? <LoadError what="projections" retry={projections.refetch} /> :
+          <ProjectionsTable nba rows={projections.data ?? []} busy={projections.isPlaceholderData} filters={filters} onSelect={(p) => select(p.player_id, p.kind)} />)}
         {tab === "compare" && <PlayerCompare onSelect={select} />}
         {tab === "check" && <div className="stack"><TrackRecord nba /><GradesCard nba /><NbaBacktest backtest={m.backtest} /><Methodology league="nba" /></div>}
         {tab === "admin" && <Suspense fallback={<Skeleton kind="cards" />}><AdminPage embedded /></Suspense>}

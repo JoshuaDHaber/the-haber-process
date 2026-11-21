@@ -8,7 +8,7 @@ import { checkBack, localWhen } from "../sync";
 import { useSort } from "../useSort";
 import Avatar from "./Avatar";
 import { BookName } from "./BookBadge";
-import EmptyState, { type PreviewGame } from "./EmptyState";
+import EmptyState, { LoadError, type PreviewGame } from "./EmptyState";
 import HowToRead from "./HowToRead";
 import Info from "./Info";
 import MatchupGrade from "./MatchupGrade";
@@ -81,7 +81,14 @@ export default function KingBoard({ gameday, book, pills, onSelect, games, nextU
   const busy = q.isPlaceholderData;
   // the primer explains columns, so it comes with the rows: an empty board leads with its message, and a cold load
   // doesn't show it only to take it away
-  const empty = !q.isLoading && !q.error && !players.length;
+  const failed = !!q.error && !q.data;
+  // games on the board's day the model hasn't projected yet: named under the board, as Early win names its unpriced games.
+  // A game counts as missing when none of its teams has a player here; the names are shown only when that matches the count
+  const slate = games.filter((g) => g.gameday === q.data?.gameday);
+  const missing = Math.max(0, slate.length - (q.data?.games ?? slate.length));
+  const teams = new Set(players.map((r) => r.team));
+  const unprojected = slate.filter((g) => { const [, , away, home] = g.game_id.split("_"); return !teams.has(away) && !teams.has(home); });
+  const empty = !q.isLoading && !failed && !players.length;
   return (
     <>
       <div className="hot-bar">{pills}</div>
@@ -93,7 +100,7 @@ export default function KingBoard({ gameday, book, pills, onSelect, games, nextU
           <li><b>PRA line</b> and <b>Over EV</b> <Info term="ev" /> are his PRA over at this book, if it's posted. Tap a player for his full ladder.</li>
         </ol>
       </HowToRead>}
-      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Court.</p> : empty ? (
+      {q.isLoading ? <Skeleton kind="rows" /> : failed ? <LoadError what="King of the Court" retry={q.refetch} /> : empty ? (
         games.length ? (
           <EmptyState icon={IconClock} title={`No PRA projections for ${slatePhrase(games.map((g) => g.gameday))} yet`}
             preview={games} columns={["Top PRA", "Leads slate"]} league="nba">
@@ -114,6 +121,9 @@ export default function KingBoard({ gameday, book, pills, onSelect, games, nextU
             <Table rows={sleepers} onSelect={select} top={top} busy={busy} chip={false} />
           </section>
         )}
+        {missing > 0 && <p className="mut board-note">{unprojected.length === missing
+          ? <>Not projected yet: {unprojected.map((g) => g.label).join(", ")}.</>
+          : <>{missing} of {slate.length} games aren't projected yet.</>} They join the board once the model projects them.</p>}
       </>}
     </>
   );

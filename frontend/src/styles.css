@@ -38,7 +38,8 @@ input[type="search"] { min-width: 170px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { font-size: 12px; color: var(--mut); font-weight: 600; background: var(--card); user-select: none; }
-th.sortable { cursor: pointer; } th.sortable:hover { color: var(--ink); }
+th.sortable:hover { color: var(--ink); }
+.th-sort { all: unset; cursor: pointer; border-radius: 4px; } .th-sort:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
 th:first-child, td:first-child { text-align: left; } tr:last-child td { border-bottom: 0; }
 tr.clickable { cursor: pointer; } tr.clickable:hover, tr.clickable:focus { background: var(--chip); outline: none; }
 .pick { font-weight: 600; } .over, .pos { color: var(--good); } .under { color: var(--bad); } .pos { font-weight: 600; }
@@ -152,7 +153,7 @@ tr.clickable { transition: background .12s; }
 .overlay { backdrop-filter: blur(3px); } .drawer { border-radius: 20px 0 0 20px; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 0 0 18px; }
-.tile { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 18px; background: var(--card); border: 1px solid var(--line);
+.tile { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 16px; background: var(--card); border: 1px solid var(--line);
   box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 10px 28px -14px rgba(15,23,42,.2); transition: transform .18s, box-shadow .18s, border-color .18s; }
 button.tile { cursor: pointer; } button.tile:hover, button.tile:focus-visible { transform: translateY(-3px); border-color: var(--acc); box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--acc) 55%, transparent); }
 .tile.lead { color: var(--bg); border-color: transparent; background: var(--ink); }
@@ -236,7 +237,7 @@ tr.clickable:hover td:last-child { border-top-right-radius: 10px; border-bottom-
 @media (max-width: 700px) {
   .sortbar { display: flex; align-items: center; gap: 6px; overflow-x: auto; margin: 0 0 10px; scrollbar-width: none; }
   .sortbar::-webkit-scrollbar { display: none; }
-  .sortbar button { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--mut); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .sortbar button { flex: none; min-height: 32px; border: 1px solid var(--line); background: var(--card); color: var(--mut); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .sortbar button.on { color: var(--bg); border-color: var(--ink); background: var(--ink); }
 
   .card.scroll.cards { background: none; border: 0; box-shadow: none; padding: 0; overflow: visible; }
@@ -396,7 +397,7 @@ table.wx-games td.num, table.wx-games th.num { text-align: right; }
 
 /* Games tab: one tile per game on the slate */
 .gt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
-.gt { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 18px; background: var(--card); border: 1px solid var(--line);
+.gt { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 16px; background: var(--card); border: 1px solid var(--line);
   box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 8px 24px -12px rgba(15,23,42,.12); transition: transform .15s, border-color .15s, box-shadow .15s; min-width: 0; }
 .gt:hover, .gt:focus-visible { border-color: var(--acc); transform: translateY(-2px); box-shadow: 0 12px 28px -12px color-mix(in srgb, var(--acc) 45%, transparent); }
 .gt:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
@@ -681,6 +682,14 @@ input[type="search"] { font-weight: 400; }
 .skel-panel { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
 .skel-head { display: flex; align-items: center; gap: 14px; } .skel-head span { display: flex; flex-direction: column; gap: 8px; }
 .skel .skel-chart { height: 160px; border-radius: 12px; }
+.skel-tiles { width: 100%; display: flex; gap: 14px; overflow: hidden; padding: 2px 2px 10px; margin-bottom: 8px; }
+.skel-tile { flex: 1 0 min(300px, 82%); max-width: 420px; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.skel-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 4px 0; } .skel-stats i { height: 34px; }
+.skel-leg { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: center; } .skel-leg span { display: flex; flex-direction: column; gap: 6px; }
+.skel-leg .skel-dot { width: 26px; height: 26px; }
+.skel .skel-btn { height: 38px; border-radius: 10px; margin-top: 4px; }
+.skel .skel-wide { height: 28px; border-radius: 8px; }
+.skel-card .skel-row { padding: 12px 0; } .skel-card .skel-row:last-of-type { border-bottom: 0; }
 @keyframes skel { 50% { opacity: .45; } }
 
 /* ---------- numbers line up; text columns read left to right ---------- */
@@ -1058,7 +1067,7 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .c-run .spark { margin-bottom: 2px; }
 .run-full { color: var(--good); }
 /* teams on a win streak: W/L marks like the players' sparkline bars (green cleared, grey didn't) */
-.hot-teams { margin-bottom: 14px; } .hot-teams .sub-h { margin: 0 0 8px; }
+.hot-teams { margin-bottom: 14px; } .hot-teams .sub-h, .sub-h.hot-sub { margin: 0 0 8px; }
 .wl { display: inline-flex; gap: 3px; margin-bottom: 2px; }
 .wl i { width: 18px; height: 18px; border-radius: 4px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; font-style: normal;
   background: var(--chip); color: var(--mut); }
@@ -1152,5 +1161,5 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
   .es-cols { font-size: 11px; }
 }
 .board-note { margin: 8px 2px 0; }
-.ladder-loading { margin: 6px 2px 12px; }
+.empty-state.error .es-icon { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .empty-state:focus { outline: none; } .empty-state:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }

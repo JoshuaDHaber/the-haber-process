@@ -10,7 +10,7 @@ import HowToRead from "./HowToRead";
 import Info from "./Info";
 import Menu, { MenuItem } from "./Menu";
 import { localWhen } from "../sync";
-import EmptyState from "./EmptyState";
+import EmptyState, { LoadError } from "./EmptyState";
 import Skeleton from "./Skeleton";
 import SortBar from "./SortBar";
 import { PickAvatar } from "./TeamLogo";
@@ -55,7 +55,8 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
   const b = q.data;
   const rows = b?.rows ?? [];
   const { sorted, toggle, arrow } = useSort(rows, "p_long");
-  const shown = games.find((g) => g.game_id === b?.game_id);
+  // the board's game, or (before it loads, or if it failed) the one asked for
+  const shown = games.find((g) => g.game_id === (b?.game_id ?? gameId));
   const select: Select = (r) => r.player_id && onSelect(r.player_id, r.pick);
   const top = Math.max(0, ...rows.map((r) => r.p_long));
   return (
@@ -65,7 +66,7 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
         {games.length > 0 && (
           <Menu align="start" ariaLabel={`Game: ${shown?.label ?? "next game"}`} label={shown?.label ?? "Next game"}>
             {(close) => games.map((g) => (
-              <MenuItem key={g.game_id} on={b?.game_id === g.game_id} onClick={() => { close(); onGame(g.game_id); }}>
+              <MenuItem key={g.game_id} on={shown?.game_id === g.game_id} onClick={() => { close(); onGame(g.game_id); }}>
                 {g.label} <span className="mut">{kickoff(g.gameday, g.gametime)}</span>
               </MenuItem>
             ))}
@@ -80,9 +81,9 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
           <li><b>Rest of offense</b> covers everyone not listed, and <b>defense & returns</b> covers pick-sixes and return TDs, which are nearly always long. Team TDs come from the game total and spread.</li>
         </ol>
       </HowToRead>}
-      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Endzone.</p> : !rows.length ? (
+      {q.isLoading ? <Skeleton kind="rows" /> : q.error && !b ? <LoadError what="King of the Endzone" retry={q.refetch} /> : !rows.length ? (
         games.length ? (
-          <EmptyState icon={IconClock} title={`No touchdown chances for ${(shown ?? games.find((g) => g.game_id === gameId))?.label ?? "this game"} yet`}>
+          <EmptyState icon={IconClock} title={`No touchdown chances for ${shown?.label ?? "this game"} yet`}>
             They come once the week's projections are in. Check back after the next update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}{games.length > 1 ? ", or pick another game above" : ""}.
           </EmptyState>
         ) : <EmptyState icon={IconCalendarOff} title="No games on the slate yet">They appear after the next scheduled update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.</EmptyState>

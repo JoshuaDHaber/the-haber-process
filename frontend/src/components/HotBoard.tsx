@@ -1,5 +1,5 @@
 import { IconFlame, IconSnowflake } from "@tabler/icons-react";
-import EmptyState, { focusEmpty } from "./EmptyState";
+import EmptyState, { focusEmpty, LoadError } from "./EmptyState";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Filters, type GameWeather, type HotPick, type HotTeam } from "../api";
@@ -16,7 +16,7 @@ import { MoneylineAdd } from "./Moneylines";
 import { PickAvatar } from "./TeamLogo";
 import SidePill from "./SidePill";
 import Skeleton from "./Skeleton";
-import SortBar from "./SortBar";
+import SortBar, { SortTh } from "./SortBar";
 import Spark from "./Spark";
 import type { Tile } from "./TopTiles";
 import WeatherChip from "./WeatherChip";
@@ -49,11 +49,11 @@ function Results({ t }: { t: HotTeam }) {
 }
 
 /** Teams on a winning streak, each with its moneyline at the board's book and a button to put it on the slip. */
-function HotTeams({ teams, weather }: { teams: HotTeam[]; weather: Record<string, GameWeather | null | undefined> }) {
+function HotTeams({ teams, weather, busy }: { teams: HotTeam[]; weather: Record<string, GameWeather | null | undefined>; busy: boolean }) {
   return (
     <section className="hot-teams" aria-labelledby="hot-teams-h">
       <h3 id="hot-teams-h" className="sub-h">Teams on a win streak <span className="mut">· {teams.length}</span></h3>
-      <div className="card scroll cards">
+      <div className={`card scroll cards${busy ? " refreshing" : ""}`} aria-busy={busy}>
         <table className="t-hot t-hot-teams">
           <thead>
             <tr>
@@ -104,11 +104,11 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
   const teams = side === "Over" ? teamsQuery.data ?? [] : [];
   // the server's order (games cleared, then streak, then margin) is the default; "rank" keeps it
   const ranked = rows.map((r, i) => ({ ...r, rank: -i }));
-  const { sorted, toggle, arrow } = useSort(ranked, "rank");
+  const { sorted, toggle, arrow, sortOf } = useSort(ranked, "rank");
   // an empty board's way out: the next shorter stretch, if there is one
   const shorter = [...WINDOWS[league]].reverse().find((n) => n < games);
   const th = (key: string, label: string, term?: Term) => (
-    <th scope="col" onClick={() => toggle(key)} aria-sort="none" className="sortable">{label}{arrow(key)}{term && <> <Info term={term} /></>}</th>
+    <SortTh k={key} label={label} extra={term && <Info term={term} />} toggle={toggle} arrow={arrow} sortOf={sortOf} />
   );
   return (
     <>
@@ -130,15 +130,18 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
           {side === "Over" && <li>Teams that have won {MIN_TEAM_STREAK} or more in a row this season sit on top, with their moneyline. The price already knows they've been winning, so read the EV the same way.</li>}
         </ol>
       </HowToRead>}
-      {teams.length > 0 && <HotTeams teams={teams} weather={weather} />}
-      {hot.isLoading ? <Skeleton kind="rows" /> : hot.error ? <p className="err">Couldn't load who's hot.</p> : !rows.length ? (
+      {teams.length > 0 && <HotTeams teams={teams} weather={weather} busy={teamsQuery.isPlaceholderData} />}
+      {hot.isLoading ? <Skeleton kind="rows" /> : hot.error && !hot.data ? <LoadError what="who's hot" retry={hot.refetch} /> : !rows.length ? (
         <EmptyState id="no-hot" icon={side === "Over" ? IconFlame : IconSnowflake} title={teams.length > 0 ? "No players on a run yet" : `Nobody's ${side === "Over" ? "hot" : "cold"} over the last ${games} games`}
           action={shorter && <button type="button" className="chip-btn" onClick={() => { setGames(shorter); focusEmpty("no-hot"); }}>Try the last {shorter} games</button>}>
           No one on the board has {side === "Over" ? "cleared" : "stayed under"} their line in at least 60% of those games.{shorter ? " A shorter stretch or another market may turn some up." : " Try another market."}
         </EmptyState>
       ) : <>
+        {/* with the teams above, the players need their own header: otherwise their cards run on from the teams' and the
+            sort chips (players only) read as sorting both */}
+        {teams.length > 0 && <h3 className="sub-h hot-sub">Players on a run <span className="mut">· {rows.length}</span></h3>}
         <SortBar toggle={toggle} arrow={arrow} options={[["rank", "Hottest"], ["streak", "Streak"], ["ev", "EV"], ["name", "Name"]]} />
-        <div className="card scroll cards">
+        <div className={`card scroll cards${hot.isPlaceholderData ? " refreshing" : ""}`} aria-busy={hot.isPlaceholderData}>
           <table className="t-hot">
             <thead>
               <tr>
