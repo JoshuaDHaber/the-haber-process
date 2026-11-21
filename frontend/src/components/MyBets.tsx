@@ -54,6 +54,8 @@ function LegRow({ leg, bet }: { leg: TrackedLeg; bet: TrackedBet }) {
         {leg.alt && <span className="alt">alt</span>}
         <span className="mut bet-leg-sub">{leg.team} {leg.opp ? `vs ${leg.opp}` : ""} · {new Date(leg.kickoff + "Z").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
           {leg.kind === "ml" ? (leg.result === "void" ? " · no result" : leg.actual == null ? "" : leg.actual === 0 ? " · tied" : ` · ${leg.actual > 0 ? "won" : "lost"} by ${Math.abs(leg.actual)}`)
+            + (bet.early_win && leg.lead != null && leg.actual != null && leg.actual <= 0
+              ? (leg.lead >= bet.early_win ? `, but led by ${leg.lead}: won early` : `, led by ${leg.lead} at most`) : "")
             : leg.result === "void" ? " · didn't play" : leg.actual != null ? ` · ${leg.actual}` : ""}</span>
       </span>
       <span className="mut">{leg.odds ? americanOdds(leg.odds) : ""}</span>
@@ -87,6 +89,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
     bet.bonus && <span key="b" className="bet-pill" title="Placed with a bonus bet: not counted as money you staked">Bonus bet</span>,
     bet.boost && <span key="x" className="bet-pill" title={`A ${bet.boost}% profit boost: a win pays ${1 + bet.boost / 100}x the winnings at these odds`}>{bet.boost}% boost</span>,
     bet.no_sweat && <span key="n" className="bet-pill" title={`A no-sweat bet: if it loses, ${money(bet.no_sweat)} comes back as a bonus bet`}>No sweat</span>,
+    bet.early_win && <span key="e" className="bet-pill" title={`An early-win token: it pays as a win once the team leads by ${bet.early_win}, even if they lose`}>Early win · up {bet.early_win}</span>,
     bet.late && <span key="l" className="bet-pill" title="Added after its game had started, so the result may have been known">Added late</span>,
   ].filter(Boolean);
   const showTags = bet.tags.length > 0 && !editing;
@@ -123,7 +126,8 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
             <label className="auth-label">Stake<input className="auth-input" inputMode="decimal" value={stake} onChange={(e) => setStake(e.target.value)} autoFocus /></label>
             <label className="auth-label">Odds<input className="auth-input" value={odds} onChange={(e) => setOdds(e.target.value)} aria-invalid={!oddsN} /></label>
           </div>
-          <PromoFields promo={promo} onChange={setPromo} stake={stakeN > 0 ? stakeN : 0} book={bet.book} compact />
+          <PromoFields promo={promo} onChange={setPromo} stake={stakeN > 0 ? stakeN : 0} book={bet.book} compact
+            moneyline={bet.kind === "single" && bet.legs[0]?.kind === "ml" && bet.league !== "oth" ? bet.league : null} />
           <label className="auth-label" htmlFor={`tags-${bet.id}`}>Tags</label>
           <TagInput id={`tags-${bet.id}`} tags={tags} onChange={setTags} suggestions={knownTags} />
           <div className="bet-edit-row">

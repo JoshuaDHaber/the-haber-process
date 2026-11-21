@@ -303,6 +303,8 @@ class Bet(Base):
     boost: Mapped[int] = mapped_column(Integer, nullable=True)
     # a no-sweat bet: the most the book refunds, as a bonus bet, if it loses (up to the stake)
     no_sweat: Mapped[float] = mapped_column(Float, nullable=True)
+    # an early-win token on a moneyline: the lead (points) at which the book pays it as a win, whatever the final score
+    early_win: Mapped[int] = mapped_column(Integer, nullable=True)
     placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     settled_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     legs: Mapped[list["BetLeg"]] = relationship(back_populates="bet", cascade="all, delete-orphan", order_by="BetLeg.id")
@@ -335,6 +337,7 @@ class BetLeg(Base):
     close_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     close_books: Mapped[int] = mapped_column(Integer, nullable=True)
     graded_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    lead: Mapped[float] = mapped_column(Float, nullable=True)   # a moneyline's team's largest lead in the game (early-win bets)
     bet: Mapped[Bet] = relationship(back_populates="legs")
 
 
@@ -539,6 +542,7 @@ def ensure_columns(eng) -> bool:
                                  ("bets", "bonus", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "late", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "boost", "INTEGER"), ("bets", "no_sweat", "FLOAT"),
+                                 ("bets", "early_win", "INTEGER"), ("bet_legs", "lead", "FLOAT"),
                                  ("bet_legs", "close_p", "FLOAT"), ("bet_legs", "close_at", "TIMESTAMP"), ("bet_legs", "close_books", "INTEGER"),
                                  *((t, c, typ) for t in ("projections", "nba_projections")
                                    for c, typ in (("dvp", "FLOAT"), ("dvp_rank", "INTEGER"), ("dvp_n", "INTEGER"))),

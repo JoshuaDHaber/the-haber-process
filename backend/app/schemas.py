@@ -721,6 +721,7 @@ class BetIn(BaseModel):
     bonus: bool = False              # placed with a bonus bet: not the bettor's money, and a win pays only the profit
     boost: Optional[int] = None      # a profit boost, in percent: the winnings are (1 + boost/100) x what the odds pay
     no_sweat: Optional[float] = None # a no-sweat bet: the most the book refunds as a bonus bet if it loses (up to the stake)
+    early_win: Optional[int] = None  # an early-win token on a single moneyline: pays as a win once the team leads by this many
 
 
 class BetPlayer(BaseModel):
@@ -745,6 +746,7 @@ class BetPatch(BaseModel):
     bonus: Optional[bool] = None
     boost: Optional[int] = None      # 0 takes the boost off
     no_sweat: Optional[float] = None # 0 takes the no-sweat refund off
+    early_win: Optional[int] = None  # 0 takes the early-win token off
     # settle by hand (the book settled differently), or "open" to hand it back to grading
     status: Optional[Literal["open", "won", "lost", "push", "void"]] = None
 
@@ -766,6 +768,7 @@ class BetLegOut(BaseModel):
     prob: Optional[float] = None
     ev: Optional[float] = None
     actual: Optional[float] = None
+    lead: Optional[float] = None      # a moneyline's team's largest lead (fetched for early-win bets)
     result: Optional[str] = None
     close_p: Optional[float] = None   # the market's fair chance of this leg at kickoff (None: not started, or no closing quotes)
     ev_close: Optional[float] = None  # what this price was worth at that chance: close_p x decimal odds - 1
@@ -791,6 +794,7 @@ class BetOut(BaseModel):
     boost: Optional[int] = None      # a profit boost, in percent (to_pay and payout include it)
     no_sweat: Optional[float] = None # a no-sweat bet's refund if it loses, as a bonus bet (at most the stake)
     refund: float = 0.0              # what a lost no-sweat bet earned back in bonus bets
+    early_win: Optional[int] = None  # an early-win token: the lead that pays the moneyline as a win
     placed_at: str
     settled_at: Optional[str] = None
     started: bool                    # its first game has kicked off
