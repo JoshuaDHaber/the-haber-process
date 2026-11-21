@@ -44,3 +44,6 @@ export function untilText(iso: string, now = Date.now()): string {
 export function localWhen(iso: string): string {
   return new Date(iso + "Z").toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
+
+/** For an empty board: "Check back after the next update, Sat 10:00 AM.", without the time when no sync is scheduled. */
+export const checkBack = (nextUpdate?: string | null) => `Check back after the next update${nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.`;

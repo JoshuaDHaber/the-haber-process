@@ -205,6 +205,8 @@ function PublicApp() {
   const latestOdds = oddsAt;
   const pricedPage = knownPath && (!!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos");
   const href = (t: Tab) => leaguePath("nfl", SLUGS[t]);
+  // when the next scheduled sync runs, for empty boards to say when to check back
+  const nextUpdate = m.auto_sync?.enabled ? m.auto_sync.next_at : null;
   const promoPills = (
     <div className="seg small" role="group" aria-label="Promotion">
       {PROMOS.map(([k, label]) => <button key={k} className={promo === k ? "on" : ""} aria-pressed={promo === k} onClick={() => setPromo(k)}>{label}</button>)}
@@ -256,7 +258,7 @@ function PublicApp() {
       {tab === "promos" && (promo === "endzone"
         ? <EndzoneBoard games={m.games} gameId={endzoneGame} onGame={setEndzoneGame} book={debounced.book} pills={promoPills}
           onSelect={(id, p) => select({ id, kind: "td", pick: p ? { side: p.side, line: p.line, book: p.book } : undefined })} />
-        : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={m.games.map((g) => g.game_id)} pills={promoPills} />)}
+        : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={m.games.map((g) => g.game_id)} pills={promoPills} nextUpdate={nextUpdate} />)}
       {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error ? <p className="err">Couldn't load the injury report.</p> :
         <Injuries report={injuries.data!} games={m.games} onSelect={(id, kind) => select({ id, kind })} />)}
       {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> :

@@ -1,11 +1,14 @@
+import { IconCalendarOff, IconClock } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api, type KingRow, type Pick } from "../api";
-import { americanOdds, fmtProj, fmtSd, kickoff, matchup, pct, signedPct } from "../format";
+import { americanOdds, fmtProj, fmtSd, kickoff, matchup, pct, signedPct, slatePhrase } from "../format";
 import { chance, fair, meterWidth } from "../promo";
+import { checkBack, localWhen } from "../sync";
 import { useSort } from "../useSort";
 import Avatar from "./Avatar";
 import { BookName } from "./BookBadge";
+import EmptyState, { type PreviewGame } from "./EmptyState";
 import HowToRead from "./HowToRead";
 import Info from "./Info";
 import MatchupGrade from "./MatchupGrade";
@@ -67,7 +70,8 @@ function Table({ rows, onSelect, top, busy, chip = true }: { rows: KingRow[]; on
 }
 
 /** King of the Court: who's most likely to have the most points + rebounds + assists on the day's slate, then the sleepers. */
-export default function KingBoard({ gameday, book, pills, onSelect }: { gameday?: string; book: string; pills: ReactNode; onSelect: (pid: string, pick?: Pick | null) => void }) {
+export default function KingBoard({ gameday, book, pills, onSelect, games, nextUpdate }: { gameday?: string; book: string; pills: ReactNode;
+  onSelect: (pid: string, pick?: Pick | null) => void; games: PreviewGame[]; nextUpdate?: string | null }) {
   const q = useQuery({ queryKey: ["king", gameday, book], queryFn: () => api.king(gameday, book), placeholderData: (p) => p });
   const players = q.data?.players ?? [];
   const { sorted, toggle, arrow } = useSort(players, "p_top");
@@ -75,19 +79,29 @@ export default function KingBoard({ gameday, book, pills, onSelect }: { gameday?
   const select: Select = (r) => onSelect(r.player_id, r.pick);
   const top = Math.max(0, ...players.map((r) => r.p_top));
   const busy = q.isPlaceholderData;
+  // the primer explains columns, so it comes with the rows: an empty board leads with its message, and a cold load
+  // doesn't show it only to take it away
+  const empty = !q.isLoading && !q.error && !players.length;
   return (
     <>
       <div className="hot-bar">{pills}</div>
-      <HowToRead storageKey="how-to-read-king-dismissed">
+      {players.length > 0 && <HowToRead storageKey="how-to-read-king-dismissed">
         <ol>
           <li>King of the Court pays when your player has the most points + rebounds + assists (PRA) of anyone on the day's slate. Ties count.</li>
           <li><b>Leads slate</b> is how often he comes out on top across {(q.data?.sims ?? 20000).toLocaleString()} simulated nights, each player drawn from his projection and the model's record of past misses. <b>Fair</b> is the price where that chance breaks even.</li>
           <li><b>Sleepers</b> sit outside the top five projections but face a soft defense for their position (matchup A or B) and still lead often enough to matter. The projection already counts the defense, so the chance is the model's own.</li>
           <li><b>PRA line</b> and <b>Over EV</b> <Info term="ev" /> are his PRA over at this book, if it's posted. Tap a player for his full ladder.</li>
         </ol>
-      </HowToRead>
-      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Court.</p> : !players.length ? (
-        <div className="card empty">No PRA projections for this slate yet. They come with each sync once the day's games are set.</div>
+      </HowToRead>}
+      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Court.</p> : empty ? (
+        games.length ? (
+          <EmptyState icon={IconClock} title={`No PRA projections for ${slatePhrase(games.map((g) => g.gameday))} yet`}
+            preview={games} columns={["Top PRA", "Leads slate"]} league="nba">
+            The model hasn't projected this slate yet. {checkBack(nextUpdate)}
+          </EmptyState>
+        ) : (
+          <EmptyState icon={IconCalendarOff} title="No games on the slate yet">They appear after the next scheduled update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.</EmptyState>
+        )
       ) : <>
         <SortBar toggle={toggle} arrow={arrow} options={[["p_top", "Leads slate"], ["p_top3", "Top 3"], ["mu", "Projection"], ["name", "Name"]]} />
         <section className="hot-teams" aria-labelledby="king-top-h">
