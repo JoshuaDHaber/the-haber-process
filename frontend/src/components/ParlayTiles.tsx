@@ -12,6 +12,7 @@ import { Star } from "./icons";
 import Info from "./Info";
 import SidePill from "./SidePill";
 import { PickAvatar } from "./TeamLogo";
+import EmptyState from "./EmptyState";
 
 const STAKE = 10;
 /** Whether the comparison table was left open, remembered per browser. */
@@ -205,7 +206,7 @@ interface Props {
 function TryBook({ book, counts, onBook }: { book: string | null; counts?: Record<string, number>; onBook?: (b: string) => void }) {
   const best = Object.entries(counts ?? {}).filter(([b, n]) => b !== book && n > 0).sort((a, b) => b[1] - a[1])[0];
   if (!best || !onBook) return null;
-  return <> <button className="link" onClick={() => onBook(best[0])}>Try {best[0]} ({best[1]} parlay{best[1] === 1 ? "" : "s"})</button></>;
+  return <button type="button" className="chip-btn" onClick={() => onBook(best[0])}>Try {best[0]} ({best[1]} parlay{best[1] === 1 ? "" : "s"})</button>;
 }
 
 /** A section's tiles in one sideways row, so a section is one screen tall on a phone and never leaves a lone tile on a desktop. */
@@ -217,7 +218,6 @@ const Row = ({ tiles, onSelect, label }: { tiles: Parlay[]; onSelect?: OnSelect;
 /** Recommended parlays at one sportsbook: tiles of high-probability plays, then ladder-style tiles, each with the combined odds. */
 export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, parlayCounts, onBook, onSelect }: Props) {
   const nba = getLeague() === "nba";
-  const ladderMarkets = nba ? "points, rebounds, assists, threes, combos, steals and blocks" : "rushing and receiving";
   const all = [...parlays, ...tdParlays, ...ladders];
   const likeliest = all.reduce<Parlay | null>((b, p) => (!b || p.prob > b.prob ? p : b), null);
   const rows = ladderRows(ladders, nba);
@@ -241,13 +241,17 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
       <h2 className="parlay-h" id="parlays-likely">Likely plays <Info term="likely" /></h2>
       {parlays.length
         ? <Row tiles={parlays} onSelect={onSelect} label="Recommended parlays" />
-        : <div className="card empty">Not enough likely plays at {book ?? "one sportsbook"} to build one. These need at least three high-probability plays from different players{selectedGames.length ? " in the selected games" : ""}.<TryBook book={book} counts={parlayCounts} onBook={onBook} /></div>}
+        : <EmptyState compact title={`Not enough likely plays at ${book ?? "one sportsbook"} to build one`} action={<TryBook book={book} counts={parlayCounts} onBook={onBook} />}>
+            These need at least three high-probability plays from different players{selectedGames.length === 1 ? " in this game" : selectedGames.length ? " in the selected games" : ""}.
+          </EmptyState>}
 
       {!nba && <>
       <h2 className="parlay-h" id="parlays-td">Touchdowns <Info term="tdParlay" /></h2>
       {tdParlays.length
         ? <Row tiles={tdParlays} onSelect={onSelect} label="Touchdown parlays" />
-        : <div className="card empty">No anytime-TD prices at {book ?? "this sportsbook"} to parlay{selectedGames.length === 1 ? " for this game" : ""} yet. Books usually post them a day or two before kickoff.</div>}
+        : <EmptyState compact title={`No anytime-TD prices at ${book ?? "this sportsbook"} to parlay${selectedGames.length === 1 ? " for this game" : ""} yet`}>
+            Books usually post them a day or two before kickoff.
+          </EmptyState>}
       </>}
 
       <h2 className="parlay-h" id="parlays-ladders">Ladders <Info term="ladder" /></h2>
@@ -257,7 +261,10 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
             {rows.length > 1 && <h3 className="ladder-row-h">{row.label} <small>{row.tiles.length}</small></h3>}
             <Row tiles={row.tiles} onSelect={onSelect} label={`${row.label} ladders`} />
           </section>))
-        : <div className="card empty">{laddersLoading ? "Loading alternate lines…" : `No ${ladderMarkets} over combinations with betslip links at ${book ?? "this sportsbook"} land between +100 and +300. ${nba ? "NBA alternate lines come with the day-of props syncs. " : ""}Not every book publishes links for alternate lines; try another book.`}</div>}
+        : laddersLoading ? <p className="mut ladder-loading" role="status">Loading alternate lines…</p>
+        : <EmptyState compact title={`No ladders at ${book ?? "this sportsbook"} between +100 and +300`}>
+            Ladders need alternate lines with betslip links. {nba ? "NBA alternate lines come with the day-of props syncs, and not" : "Not"} every book links them, so another book may have some.
+          </EmptyState>}
 
       {altProps.length > 0 && <>
         <h2 className="parlay-h" id="parlays-alt">Likely alternate props <Info term="altProps" /></h2>

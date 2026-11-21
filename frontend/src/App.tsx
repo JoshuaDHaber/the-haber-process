@@ -244,25 +244,25 @@ function PublicApp() {
           : TITLE[tab]} />
       <TopTiles tiles={tiles} />
 
-      {tab === "games" && <Games games={m.games} nextGames={m.next_games} nextByes={m.next_byes} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} />}
+      {tab === "games" && <Games games={m.games} nextGames={m.next_games} nextByes={m.next_byes} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} nextUpdate={nextUpdate} />}
       {tab !== "games" && tab !== "model" && tab !== "parlays" && tab !== "promos" && tab !== "admin" && tab !== "account" && tab !== "bets" && tab !== "injuries" && tab !== "compare" && <Controls filters={filters} onChange={setFilters} games={m.games} showPickControls={tab === "picks"} allMarkets={tab === "hot" ? "All markets" : undefined} />}
-      {tab === "picks" && <HowToRead />}
+      {tab === "picks" && !!picks.data?.length && <HowToRead />}
       {(tab === "picks" || tab === "projections") && selectedGame && <GameWeather game={selectedGame} fit={m.weather} />}
 
       {tab === "picks" && (picks.isLoading ? <Skeleton kind="rows" /> :
-        <PicksTable picks={picks.data ?? []} weather={weatherByGame} onSelect={(p) => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } })} />)}
+        <PicksTable picks={picks.data ?? []} weather={weatherByGame} filters={filters} onFilters={setFilters} onSelect={(p) => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } })} />)}
       {tab === "hot" && <HotBoard board={hot} weather={weatherByGame} onSelect={(p) => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } })} />}
       {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> :
         <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={m.games} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays} tdParlays={board.tdParlays}
           ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={(id, kind, pick) => select({ id, kind, pick })} />)}
       {tab === "promos" && (promo === "endzone"
-        ? <EndzoneBoard games={m.games} gameId={endzoneGame} onGame={setEndzoneGame} book={debounced.book} pills={promoPills}
+        ? <EndzoneBoard games={m.games} gameId={endzoneGame} onGame={setEndzoneGame} book={debounced.book} pills={promoPills} nextUpdate={nextUpdate}
           onSelect={(id, p) => select({ id, kind: "td", pick: p ? { side: p.side, line: p.line, book: p.book } : undefined })} />
         : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={m.games.map((g) => g.game_id)} pills={promoPills} nextUpdate={nextUpdate} />)}
       {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error ? <p className="err">Couldn't load the injury report.</p> :
         <Injuries report={injuries.data!} games={m.games} onSelect={(id, kind) => select({ id, kind })} />)}
       {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> :
-        <ProjectionsTable rows={projections.data ?? []} weather={weatherByGame} onSelect={(p) => select({ id: p.player_id, kind: p.kind })} />)}
+        <ProjectionsTable rows={projections.data ?? []} weather={weatherByGame} filters={filters} onSelect={(p) => select({ id: p.player_id, kind: p.kind })} />)}
       {tab === "compare" && <PlayerCompare weather={weatherByGame} onSelect={(id, kind) => select({ id, kind })} />}
       {tab === "model" && <ModelCheck meta={m} />}
       {tab === "model" && <Methodology />}

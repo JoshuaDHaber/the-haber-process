@@ -87,3 +87,8 @@ export const filterParams = (f: Filters, picks: boolean, defaultBook = "all") =>
   market: f.kind !== "all" ? f.kind : null, side: picks && f.side !== "all" ? f.side : null, game: f.game !== "all" ? f.game : null,
   book: picks && f.book !== defaultBook ? f.book : null, q: f.q.trim() || null,
 });
+
+/** Whether the board's filters hide rows a "Clear filters" button would bring back: market, game, a name search, and on
+ *  Best props the side and the flagged-only switch (Min EV has its own way out; the book and market blend are settings). */
+export const filtersNarrowed = (f: Filters, picks = false) =>
+  f.kind !== "all" || f.game !== "all" || f.q.trim() !== "" || (picks && (f.side !== "all" || f.flagged));

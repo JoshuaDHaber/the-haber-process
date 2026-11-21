@@ -1,3 +1,4 @@
+import { IconClock } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import BookSelect from "./BookSelect";
 import { useMemo, useState } from "react";
@@ -12,6 +13,8 @@ import { MoneylineCard } from "./Moneylines";
 import ParlayTiles from "./ParlayTiles";
 import PicksTable from "./PicksTable";
 import ProjectionsTable from "./ProjectionsTable";
+import { checkBack } from "../sync";
+import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
 interface Props {
@@ -82,13 +85,13 @@ export default function NbaGameOverview({ game, books, book, onBook, marketWeigh
       <GamePlayerSearch rows={roster.data ?? []} onSelect={onSelect} />
 
       {ml ? (ml.blowout ? <div className="go-top"><MoneylineCard g={ml} records={game.records} /><BlowoutCard g={ml} /></div> : <MoneylineCard g={ml} records={game.records} />)
-        : moneylines.isLoading ? null : <div className="card empty">No win chances for this game yet.</div>}
+        : moneylines.isLoading ? null : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>
         <KindSeg value={propKind} onChange={setPropKind} />
         {picks.isLoading ? <Skeleton kind="rows" /> : <>
-          <PicksTable key={propKind} picks={picks.data ?? []} limit={PROPS_SHOWN} empty="No positive-EV props for this game yet. Books post NBA props the day of the game; the 10 AM, 2 PM and 6 PM ET syncs pick them up."
+          <PicksTable key={propKind} picks={picks.data ?? []} limit={PROPS_SHOWN} empty={{ title: "No positive-EV props for this game yet", body: "Books post NBA props the day of the game; the 10 AM, 2 PM and 6 PM ET syncs pick them up." }}
             onSelect={(p) => onSelect(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />
         </>}
       </section>

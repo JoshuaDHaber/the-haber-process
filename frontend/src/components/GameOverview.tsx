@@ -1,3 +1,4 @@
+import { IconClock } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import BookSelect from "./BookSelect";
 import { useMemo, useState } from "react";
@@ -12,6 +13,8 @@ import { MoneylineCard } from "./Moneylines";
 import ParlayTiles from "./ParlayTiles";
 import PicksTable from "./PicksTable";
 import ProjectionsTable from "./ProjectionsTable";
+import { checkBack } from "../sync";
+import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
 interface Props {
@@ -92,14 +95,14 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
 
       <div className="go-top">
         <GameWeather game={game} fit={fit} />
-        {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? null : <div className="card empty">No win chances for this game yet.</div>}
+        {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? null : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
       </div>
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>
         <KindSeg value={propKind} onChange={setPropKind} />
         {picks.isLoading ? <Skeleton kind="rows" /> : <>
-          <PicksTable key={propKind} picks={picks.data ?? []} limit={PROPS_SHOWN} weather={{ [id]: game.weather }} empty="No positive-EV props for this game yet. Books post props mid-week; the scheduled syncs pick them up." onSelect={(p) => onSelect(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />
+          <PicksTable key={propKind} picks={picks.data ?? []} limit={PROPS_SHOWN} weather={{ [id]: game.weather }} empty={{ title: "No positive-EV props for this game yet", body: "Books post props mid-week; the scheduled syncs pick them up." }} onSelect={(p) => onSelect(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />
         </>}
       </section>
 

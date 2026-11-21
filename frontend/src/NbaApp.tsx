@@ -1,3 +1,4 @@
+import { IconCalendarOff } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { api, type BacktestStat, type Filters, type Game, type InjuryReport, type Kind, type NbaMeta } from "./api";
@@ -25,6 +26,7 @@ import ParlayTiles from "./components/ParlayTiles";
 import PicksTable from "./components/PicksTable";
 import PlayerCompare from "./components/PlayerCompare";
 import ProjectionsTable from "./components/ProjectionsTable";
+import EmptyState from "./components/EmptyState";
 import KingBoard from "./components/KingBoard";
 import TokenBoard from "./components/TokenBoard";
 import TopTiles, { type Tile } from "./components/TopTiles";
@@ -241,11 +243,11 @@ export default function NbaApp() {
             </select>
           )} />
         <TopTiles tiles={tiles} />
-        {tab === "games" && <Games games={dateGames} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} />}
+        {tab === "games" && <Games games={dateGames} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} nextUpdate={nextUpdate} />}
         {(tab === "picks" || tab === "projections" || tab === "hot") && <Controls filters={filters} onChange={setFilters} games={dateGames} showPickControls={tab === "picks"} allMarkets={tab === "hot" ? "All markets" : undefined} />}
-      {tab === "picks" && <HowToRead />}
+      {tab === "picks" && !!picks.data?.length && <HowToRead />}
         {tab === "picks" && (picks.isLoading ? <Skeleton kind="rows" /> :
-          <PicksTable picks={picks.data ?? []} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
+          <PicksTable picks={picks.data ?? []} filters={filters} onFilters={setFilters} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
         {tab === "hot" && <HotBoard board={hot} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />}
         {tab === "promos" && (promo === "king"
           ? <KingBoard gameday={date === "all" ? undefined : date} book={debounced.book} pills={promoPills} games={dateGames} nextUpdate={nextUpdate}
@@ -257,7 +259,7 @@ export default function NbaApp() {
         {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <p className="err">Couldn't load the injury report.</p> :
           <NbaInjuries report={injuries.data} games={dateGames} onSelect={select} />)}
         {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> :
-          <ProjectionsTable nba rows={projections.data ?? []} onSelect={(p) => select(p.player_id, p.kind)} />)}
+          <ProjectionsTable nba rows={projections.data ?? []} filters={filters} onSelect={(p) => select(p.player_id, p.kind)} />)}
         {tab === "compare" && <PlayerCompare onSelect={select} />}
         {tab === "check" && <div className="stack"><TrackRecord nba /><GradesCard nba /><NbaBacktest backtest={m.backtest} /><Methodology league="nba" /></div>}
         {tab === "admin" && <Suspense fallback={<Skeleton kind="cards" />}><AdminPage embedded /></Suspense>}
@@ -298,7 +300,7 @@ function NbaInjuries({ report, games, onSelect }: { report: InjuryReport; games:
           {report.fetched_at && <> Checked {timeAgo(report.fetched_at)} (ESPN).</>} Players with projections link to them.
         </p>
       </section>
-      {!shown.length ? <div className="card empty">No games on the slate.</div> : (
+      {!shown.length ? <EmptyState icon={IconCalendarOff} title="No games on the slate">Injury reports show up here once the games are set.</EmptyState> : (
         <div className="inj-grid">{shown.map((g) => <GameInjuries key={g.game_id} game={g} report={report} onSelect={onSelect} />)}</div>
       )}
     </div>
