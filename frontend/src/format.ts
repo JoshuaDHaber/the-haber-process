@@ -188,3 +188,14 @@ export function flagChip(p: { flag?: string }): { label: string; title: string }
   const label = p.flag || "large gap";
   return { label, title: FLAG_TITLE[label] ?? FLAG_TITLE["large gap"] };
 }
+
+/** How an empty board names the games it's waiting on: "Saturday's 6 games", "Today's game", or "6 games" across dates. */
+export function slatePhrase(gamedays: string[], today: string = easternToday()): string {
+  const n = gamedays.length;
+  const games = `${n} game${n === 1 ? "" : "s"}`;
+  const days = new Set(gamedays);
+  if (!n || days.size > 1) return games;
+  const [d] = days;
+  const name = d === today ? "Today" : new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+  return n === 1 ? `${name}'s game` : `${name}'s ${games}`;
+}

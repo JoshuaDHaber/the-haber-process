@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GameWeather } from "./api";
-import { compassPoint, easternToday, groupOf, isYesNo, skyIcon, americanOdds, fmtEdge, fmtProj, fmtSd, kickoff, marketLabel, unit, notableWeather, pct, playLabel, signed, signedPct, timeAgo, weatherShort, weatherText, wxEffect } from "./format";
+import { compassPoint, easternToday, slatePhrase, groupOf, isYesNo, skyIcon, americanOdds, fmtEdge, fmtProj, fmtSd, kickoff, marketLabel, unit, notableWeather, pct, playLabel, signed, signedPct, timeAgo, weatherShort, weatherText, wxEffect } from "./format";
 
 describe("format", () => {
   it("formats percentages and signs", () => {
@@ -126,5 +126,17 @@ describe("easternToday", () => {
   it("uses the Eastern date, not UTC's", () => {
     expect(easternToday(new Date("2026-10-22T02:30:00Z"))).toBe("2026-10-21");   // 10:30 PM EDT
     expect(easternToday(new Date("2026-10-22T05:00:00Z"))).toBe("2026-10-22");
+  });
+});
+
+describe("slatePhrase", () => {
+  it("names a single day's games", () => {
+    expect(slatePhrase(["2026-11-21", "2026-11-21"], "2026-11-20")).toBe("Saturday's 2 games");
+    expect(slatePhrase(["2026-11-21"], "2026-11-20")).toBe("Saturday's game");
+    expect(slatePhrase(["2026-11-20", "2026-11-20", "2026-11-20"], "2026-11-20")).toBe("Today's 3 games");
+  });
+  it("falls back to a count across dates or with none", () => {
+    expect(slatePhrase(["2026-11-20", "2026-11-21"], "2026-11-20")).toBe("2 games");
+    expect(slatePhrase([], "2026-11-20")).toBe("0 games");
   });
 });

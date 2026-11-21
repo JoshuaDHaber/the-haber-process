@@ -192,6 +192,8 @@ export default function NbaApp() {
   const latestOdds = oddsAt;
   const pricedPage = knownPath && (!!openedGame || tab === "games" || tab === "picks" || tab === "hot" || tab === "parlays" || tab === "promos");
   const href = (t: Tab) => leaguePath("nba", SLUGS[t]);
+  // when the next scheduled sync runs, for empty boards to say when to check back
+  const nextUpdate = m.auto_sync?.enabled ? m.auto_sync.next_at : null;
   const promoPills = (
     <div className="seg small" role="group" aria-label="Promotion">
       {PROMOS.map(([k, label]) => <button key={k} className={promo === k ? "on" : ""} aria-pressed={promo === k} onClick={() => setPromo(k)}>{label}</button>)}
@@ -246,9 +248,9 @@ export default function NbaApp() {
           <PicksTable picks={picks.data ?? []} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />)}
         {tab === "hot" && <HotBoard board={hot} onSelect={(p) => select(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />}
         {tab === "promos" && (promo === "king"
-          ? <KingBoard gameday={date === "all" ? undefined : date} book={debounced.book} pills={promoPills}
+          ? <KingBoard gameday={date === "all" ? undefined : date} book={debounced.book} pills={promoPills} games={dateGames} nextUpdate={nextUpdate}
             onSelect={(pid, p) => select(pid, "pra", p ? { side: p.side, line: p.line, book: p.book } : undefined)} />
-          : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} pills={promoPills} />)}
+          : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} pills={promoPills} nextUpdate={nextUpdate} />)}
         {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> :
           <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={dateGames} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays}
             tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={select} />)}

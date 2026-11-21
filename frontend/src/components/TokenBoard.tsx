@@ -1,12 +1,15 @@
+import { IconCalendarOff, IconClock } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 import { api, type MoneylineGame, type MoneylineSide } from "../api";
-import { americanOdds, kickoff, matchup, pct, signedPct } from "../format";
+import { americanOdds, kickoff, matchup, pct, signedPct, slatePhrase } from "../format";
 import type { League } from "../league";
 import { useLeague } from "../LeagueContext";
 import { sidePick } from "../moneyline";
+import { checkBack, localWhen } from "../sync";
 import { useSort } from "../useSort";
 import { BookName } from "./BookBadge";
+import EmptyState from "./EmptyState";
 import HowToRead from "./HowToRead";
 import Info from "./Info";
 import { MoneylineAdd } from "./Moneylines";
@@ -34,35 +37,49 @@ function SeasonRecord({ s }: { s: MoneylineSide }) {
 
 /** Every side on the slate priced for an early-win token: the chance it goes up by the lead, the chance the bet cashes (up by
  *  the lead or a win) and that bet's EV at the board's book, best first. */
-export default function TokenBoard({ book, marketWeight, gameIds, pills }: { book: string; marketWeight: number | null; gameIds: string[]; pills: ReactNode }) {
+export default function TokenBoard({ book, marketWeight, gameIds, pills, nextUpdate }: { book: string; marketWeight: number | null; gameIds: string[]; pills: ReactNode; nextUpdate?: string | null }) {
   const { league } = useLeague();
   const { leads, fanduel, since, news } = LEAD_SETUP[league];
   const [lead, setLead] = useState<number>(fanduel);
   const q = useQuery({ queryKey: ["moneylines", book, marketWeight, lead], queryFn: () => api.moneylines(book, marketWeight, lead), placeholderData: (p) => p });
-  const rows = useMemo<Row[]>(() => (q.data ?? []).filter((g) => gameIds.includes(g.game_id)).flatMap((g) => g.sides
+  const slate = useMemo(() => (q.data ?? []).filter((g) => gameIds.includes(g.game_id)), [q.data, gameIds]);
+  // games with no spread yet, so no lead chances: the whole board when it's empty, or a note under it when it isn't
+  const unpriced = useMemo(() => slate.filter((g) => !g.sides.some((s) => s.token)), [slate]);
+  const rows = useMemo<Row[]>(() => slate.flatMap((g) => g.sides
     .filter((s) => s.token)
     .map((s) => ({ g, s, opp: g.sides.find((x) => x.team !== s.team)?.team ?? "", name: s.name,
-      ev: s.token!.ev ?? -Infinity, p_cash: s.token!.p_cash, p_lead: s.token!.p_lead }))), [q.data, gameIds]);
+      ev: s.token!.ev ?? -Infinity, p_cash: s.token!.p_cash, p_lead: s.token!.p_lead }))), [slate]);
   const { sorted, toggle, arrow } = useSort(rows, "ev");
+  // the lead picker and primer explain columns, so they come with the rows: an empty board leads with its message, and a
+  // cold load doesn't show them only to take them away
+  const empty = !q.isLoading && !q.error && !sorted.length;
+  const hasRows = sorted.length > 0;
   return (
     <>
       <div className="hot-bar">
         {pills}
-        <div className="seg small" role="group" aria-label="Lead the token needs">
+        {hasRows && <div className="seg small" role="group" aria-label="Lead the token needs">
           <span className="mut seg-label">Pays once up by</span>
           {leads.map((n) => <button key={n} className={lead === n ? "on" : ""} aria-pressed={lead === n} onClick={() => setLead(n)}>{n}</button>)}
-        </div>
+        </div>}
       </div>
-      <HowToRead storageKey="how-to-read-token-dismissed">
+      {hasRows && <HowToRead storageKey="how-to-read-token-dismissed">
         <ol>
           <li>An early-win token pays a moneyline as a winner once the team goes up by {lead}, whatever happens after. So the bet cashes if the team goes up {lead} <b>or</b> wins.</li>
           <li><b>Up {lead}</b> is the chance the team leads by {lead}+ at some point; <b>Cashes</b> adds the games it wins without ever getting there. Both come from the market spread, fitted on every game's largest lead since {since}.</li>
           <li><b>Token EV</b> <Info term="ev" /> is the bet's return with the token at the price shown. It's highest on underdogs: a favorite that goes up {lead} usually wins anyway, so the token adds little.</li>
           <li><b>Model ≠ market</b> marks a game where the team model and the books disagree by {Math.round(SPLIT * 100)}+ points, usually {news}. Check the news before trusting either.</li>
         </ol>
-      </HowToRead>
-      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load the moneylines.</p> : !sorted.length ? (
-        <div className="card empty">No games to price yet. Lead chances come with each sync once a game has a spread.</div>
+      </HowToRead>}
+      {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load the moneylines.</p> : empty ? (
+        unpriced.length ? (
+          <EmptyState icon={IconClock} title={`${slatePhrase(unpriced.map((g) => g.gameday))} ${unpriced.length === 1 ? "isn't" : "aren't"} priced yet`}
+            preview={unpriced} columns={["Spread", `Up ${lead}`, "Token EV"]} league={league}>
+            Lead chances need a spread, and the books haven't posted one yet. {checkBack(nextUpdate)}
+          </EmptyState>
+        ) : (
+          <EmptyState icon={IconCalendarOff} title="No games on the slate yet">They appear after the next scheduled update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.</EmptyState>
+        )
       ) : <>
         <SortBar toggle={toggle} arrow={arrow} options={[["ev", "Token EV"], ["p_cash", "Cashes"], ["p_lead", `Up ${lead}`], ["name", "Team"]]} />
         <div className={`card scroll cards${q.isPlaceholderData ? " refreshing" : ""}`} aria-busy={q.isPlaceholderData}>
@@ -102,6 +119,7 @@ export default function TokenBoard({ book, marketWeight, gameIds, pills }: { boo
             </tbody>
           </table>
         </div>
+        {unpriced.length > 0 && <p className="mut board-note">Not priced yet: {unpriced.map((g) => g.label).join(", ")}. They join the board once the books post a spread.</p>}
       </>}
     </>
   );
