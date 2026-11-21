@@ -1,7 +1,10 @@
-import type { GameWeather, Projection } from "../api";
+import { IconFilterOff } from "@tabler/icons-react";
+import type { Filters, GameWeather, Projection } from "../api";
 import { isYesNo, KIND_LABEL, effText, fmtProj, fmtSd, matchup, signed } from "../format";
 import { useIncremental } from "../useIncremental";
+import { filtersNarrowed } from "../route";
 import { useSort } from "../useSort";
+import EmptyState from "./EmptyState";
 import Avatar from "./Avatar";
 import SortBar from "./SortBar";
 import Spark from "./Spark";
@@ -10,13 +13,20 @@ import MatchupGrade from "./MatchupGrade";
 
 export const THIN_TITLE = "Only a game or two of history (a rookie, or back from IR): a rough guess, shown for reference and never priced";
 
-export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false }: { rows: Projection[]; onSelect: (p: Projection) => void; weather?: Record<string, GameWeather | null | undefined>; nba?: boolean }) {
+/** filters: the board's, so an empty board can point at the ones hiding rows (a game page has none). */
+export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false, filters }: { rows: Projection[]; onSelect: (p: Projection) => void;
+  weather?: Record<string, GameWeather | null | undefined>; nba?: boolean; filters?: Filters }) {
   const { sorted, toggle, arrow } = useSort(rows, "mu");
   const { visible, more, showMore, sentinel } = useIncremental(sorted);
   const th = (key: string, label: string, title?: string) => (
     <th scope="col" onClick={() => toggle(key)} title={title} className="sortable">{label}{arrow(key)}</th>
   );
-  if (!rows.length) return <div className="card empty">No projections match the current filters.</div>;
+  // the filter chips above already clear each filter (and "Clear all"), so the message points there instead of repeating them
+  if (!rows.length) return (
+    <EmptyState icon={IconFilterOff} title="No projections match these filters">
+      {filters && filtersNarrowed(filters) ? "Remove a filter above, or try another market or game." : "Try another market."}
+    </EmptyState>
+  );
   return (
     <>
     <SortBar toggle={toggle} arrow={arrow} options={[["mu", "Proj"], ["vol", "Volume"], ["eff", "Efficiency"], ["spread", "Spread"], ["name", "Name"]]} />

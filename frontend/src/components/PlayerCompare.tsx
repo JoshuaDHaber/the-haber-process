@@ -1,3 +1,5 @@
+import { IconUsers } from "@tabler/icons-react";
+import EmptyState from "./EmptyState";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type GameWeather, type Kind, type PlayerHit, type Projection } from "../api";
@@ -136,7 +138,7 @@ export default function PlayerCompare({ onSelect, weather = {} }: { onSelect: (i
       {favProblem && <p className="err">{favProblem}</p>}
 
       {!players.length ? (
-        <div className="card empty">Search for two to {MAX_COMPARE} players above to compare this week's projections side by side.</div>
+        <EmptyState icon={IconUsers} title="Pick players to compare">Search for 2 to {MAX_COMPARE} players above to see this week's projections side by side.</EmptyState>
       ) : (
         <div className="card scroll">
           <table className="t-cmp" style={{ "--n": players.length } as React.CSSProperties}>

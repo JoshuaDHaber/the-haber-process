@@ -1129,7 +1129,12 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .es-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; background: var(--chip); color: var(--mut); }
 .es-title { margin: 0 0 2px; font-size: 15px; line-height: 1.35; }
 .es-body { margin: 0; color: var(--mut); max-width: 62ch; }
-.es-action { margin: 12px 0 0 48px; }
+.es-action { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+.es-action.es-indent { margin-left: 48px; }
+.es-action .chip-btn { min-height: 32px; padding: 0 12px; }
+.chip-btn:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+.empty-state.compact { padding: 14px 16px; }
+.empty-state.compact .es-title { font-size: 14px; }
 .es-preview { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--es-cols, 3), minmax(52px, max-content)); column-gap: 14px; margin-top: 16px; border-top: 1px solid var(--line); opacity: .55; user-select: none; }
 .es-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .es-row > span:not(.es-game) { text-align: right; }
@@ -1142,8 +1147,10 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .es-more { grid-column: 1 / -1; padding: 8px 0 0; }
 @media (max-width: 480px) {
   .empty-state { padding: 16px 14px 14px; }
-  .es-action { margin-left: 0; }
+  .es-action.es-indent { margin-left: 0; }
   .es-preview { column-gap: 10px; }
   .es-cols { font-size: 11px; }
 }
 .board-note { margin: 8px 2px 0; }
+.ladder-loading { margin: 6px 2px 12px; }
+.empty-state:focus { outline: none; } .empty-state:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }

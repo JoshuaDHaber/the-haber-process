@@ -1,3 +1,4 @@
+import { IconCalendarOff, IconClock } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api, type EndzoneRow, type Game, type Pick } from "../api";
@@ -8,6 +9,8 @@ import { BookName } from "./BookBadge";
 import HowToRead from "./HowToRead";
 import Info from "./Info";
 import Menu, { MenuItem } from "./Menu";
+import { localWhen } from "../sync";
+import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 import SortBar from "./SortBar";
 import { PickAvatar } from "./TeamLogo";
@@ -45,8 +48,8 @@ function Row({ r, gameId, onSelect, top }: { r: EndzoneRow; gameId: string; onSe
 }
 
 /** King of the Endzone: who's most likely to score one game's longest touchdown, with the game picker beside the promo pills. */
-export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSelect }: {
-  games: Game[]; gameId: string | null; onGame: (id: string) => void; book: string; pills: ReactNode; onSelect: (pid: string, pick?: Pick | null) => void;
+export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSelect, nextUpdate }: {
+  games: Game[]; gameId: string | null; onGame: (id: string) => void; book: string; pills: ReactNode; onSelect: (pid: string, pick?: Pick | null) => void; nextUpdate?: string | null;
 }) {
   const q = useQuery({ queryKey: ["endzone", gameId, book], queryFn: () => api.endzone(gameId ?? undefined, book), placeholderData: (p) => p });
   const b = q.data;
@@ -69,16 +72,20 @@ export default function EndzoneBoard({ games, gameId, onGame, book, pills, onSel
           </Menu>
         )}
       </div>
-      <HowToRead storageKey="how-to-read-endzone-dismissed">
+      {rows.length > 0 && <HowToRead storageKey="how-to-read-endzone-dismissed">
         <ol>
           <li>King of the Endzone pays when your player scores the game's longest touchdown. Ties are usually paid as a dead heat, so they count here as a share.</li>
           <li><b>Longest TD</b> is that chance across {(b?.sims ?? 100000).toLocaleString()} simulated games. Each player scores from his anytime-TD chance, and each of his TDs is as long as one of his own from the last three seasons, pulled toward his position's. <b>Fair</b> is the price where the chance breaks even.</li>
           <li><b>If he scores</b> is how often his TD is the longest when he gets one. Deep threats rank high here, goal-line backs low, so a big anytime chance alone doesn't win this.</li>
           <li><b>Rest of offense</b> covers everyone not listed, and <b>defense & returns</b> covers pick-sixes and return TDs, which are nearly always long. Team TDs come from the game total and spread.</li>
         </ol>
-      </HowToRead>
+      </HowToRead>}
       {q.isLoading ? <Skeleton kind="rows" /> : q.error ? <p className="err">Couldn't load King of the Endzone.</p> : !rows.length ? (
-        <div className="card empty">No touchdown chances for this game yet. They come with each sync once the week's projections are in.</div>
+        games.length ? (
+          <EmptyState icon={IconClock} title={`No touchdown chances for ${(shown ?? games.find((g) => g.game_id === gameId))?.label ?? "this game"} yet`}>
+            They come once the week's projections are in. Check back after the next update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}{games.length > 1 ? ", or pick another game above" : ""}.
+          </EmptyState>
+        ) : <EmptyState icon={IconCalendarOff} title="No games on the slate yet">They appear after the next scheduled update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.</EmptyState>
       ) : <>
         <SortBar toggle={toggle} arrow={arrow} options={[["p_long", "Longest TD"], ["p_long_if_td", "If he scores"], ["p_td", "Anytime TD"], ["name", "Name"]]} />
         <section className="hot-teams" aria-labelledby="endzone-h">

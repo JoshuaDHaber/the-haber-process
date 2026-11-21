@@ -1,3 +1,5 @@
+import { IconCalendarOff } from "@tabler/icons-react";
+import EmptyState from "./EmptyState";
 import { useState } from "react";
 import type { Game, InjuredPlayer, InjuryReport, Kind } from "../api";
 import { kickoff, timeAgo } from "../format";
@@ -137,7 +139,7 @@ export default function Injuries({ report, games, onSelect }: Props) {
           {report.news_fetched_at && <> News lines and estimated returns from ESPN, checked {timeAgo(report.news_fetched_at)}.</>} Players with props link to their projections.
         </p>
       </section>
-      {!shown.length ? <div className="card empty">No games on the slate.</div> : (
+      {!shown.length ? <EmptyState icon={IconCalendarOff} title="No games on the slate">Injury reports show up here once the games are set.</EmptyState> : (
         <div className="inj-grid">
           {shown.map((g) => <GameInjuries key={g.game_id} game={g} report={report} side={side} showReserve={showReserve} onSelect={onSelect} />)}
         </div>

@@ -1,3 +1,4 @@
+import { IconCalendarOff } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import type { Game, InjuryReport, MoneylineGame, Pick } from "../api";
 import { KIND_LABEL, americanOdds, kickoff, pct, signedPct, weatherShort, weatherText, notableWeather } from "../format";
@@ -9,6 +10,8 @@ import { getLeague } from "../league";
 import { matchupColors, shadeVars } from "../teams";
 import { BookName } from "./BookBadge";
 import { FavStar, InjuryIcon, WeatherIcon } from "./icons";
+import EmptyState from "./EmptyState";
+import { localWhen } from "../sync";
 import { favoritesFirst, useFavorites } from "../favorites";
 import SidePill from "./SidePill";
 import { routeClick } from "./NavLink";
@@ -24,6 +27,8 @@ interface Props {
   moneylines: MoneylineGame[];
   injuries?: InjuryReport;
   onOpen: (gameId: string) => void;
+  /** When the next scheduled sync runs, for an empty slate to say when to check back. */
+  nextUpdate?: string | null;
 }
 
 /** "Dome", "19 mph" (with a wind icon), "72°F": the one weather fact worth a glance on a tile. */
@@ -125,10 +130,10 @@ function NextWeek({ games, byes = [] }: { games: Game[]; byes?: Props["nextByes"
 }
 
 /** The slate: one tile per game with its win chances, top prop and injury count. A tile opens that game's overview. */
-export default function Games({ games, nextGames = [], nextByes = [], picks, moneylines, injuries, onOpen }: Props) {
+export default function Games({ games, nextGames = [], nextByes = [], picks, moneylines, injuries, onOpen, nextUpdate }: Props) {
   const { teams: favs } = useFavorites();
   if (!games.length) return <>
-    <div className="card empty">No games on the slate yet. They appear after the next scheduled sync.</div>
+    <EmptyState icon={IconCalendarOff} title="No games on the slate yet">They appear after the next scheduled update{nextUpdate ? `, ${localWhen(nextUpdate)}` : ""}.</EmptyState>
     {nextGames.length > 0 && <NextWeek games={nextGames} byes={nextByes} />}
   </>;
   const nba = getLeague() === "nba";

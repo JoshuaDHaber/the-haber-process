@@ -1,9 +1,12 @@
+import { IconClock, IconFilterOff } from "@tabler/icons-react";
 import { useMemo, useState } from "react";
-import type { GameWeather, Pick } from "../api";
+import type { Filters, GameWeather, Pick } from "../api";
 import { onePerPlayer, type GroupedPick } from "../onePerPlayer";
 import { usePref } from "../prefs";
 import { flagChip, isNba, isYesNo, KIND_LABEL, americanOdds, fmtEdge, fmtProj, fmtSd, kickoff, matchup, pct, playLabel, signedPct, signedPts } from "../format";
+import { filtersNarrowed } from "../route";
 import { useSort } from "../useSort";
+import EmptyState, { focusEmpty } from "./EmptyState";
 import Avatar from "./Avatar";
 import SortBar from "./SortBar";
 import Spark from "./Spark";
@@ -26,8 +29,24 @@ function againstProjection(p: Pick): string | null {
     : `The ${fmtProj(p.kind, p.mu)} projection is an average that a few quiet games pull down. His typical game is ${typical}, over the line.`;
 }
 
-/** picks arrive best EV first. limit shows only the top rows (after grouping) with a "Show all" button, as on the game pages. */
-export default function PicksTable({ picks, onSelect, weather = {}, empty, limit }: { picks: Pick[]; onSelect: (p: Pick) => void; weather?: Record<string, GameWeather | null | undefined>; empty?: string; limit?: number }) {
+/** Best props with nothing clearing its filters. The chips above already clear market, side, game and search, so the one
+ *  button here is for Min EV, which sits behind "Filters" and has no chip at its default. */
+function NoPlays({ filters, onFilters }: { filters?: Filters; onFilters?: (f: Filters) => void }) {
+  const highEv = !!filters && filters.minEv > 0;
+  const narrowed = !!filters && filtersNarrowed(filters, true);
+  return (
+    <EmptyState id="no-plays" icon={IconFilterOff} title="No plays clear these filters"
+      action={onFilters && filters && highEv && <button type="button" className="chip-btn" onClick={() => { onFilters({ ...filters, minEv: 0 }); focusEmpty("no-plays"); }}>Lower Min EV to 0%</button>}>
+      {highEv ? <>No play is at {signedPct(filters!.minEv)} EV or better{narrowed ? " with these filters" : ""}. Lower Min EV (it can go below 0){narrowed ? " or remove a filter above" : ""} to see the closest ones.</>
+        : <>Lower Min EV further under Filters{narrowed ? ", or remove a filter above" : ""}.</>}
+    </EmptyState>
+  );
+}
+
+/** picks arrive best EV first. limit shows only the top rows (after grouping) with a "Show all" button, as on the game pages.
+ *  empty: what a game page says with no props yet; the boards instead pass their filters, for buttons that loosen them. */
+export default function PicksTable({ picks, onSelect, weather = {}, empty, limit, filters, onFilters }: { picks: Pick[]; onSelect: (p: Pick) => void;
+  weather?: Record<string, GameWeather | null | undefined>; empty?: { title: string; body: string }; limit?: number; filters?: Filters; onFilters?: (f: Filters) => void }) {
   const [grouped, setGrouped] = usePref("one_per_player");
   // phones: compact cards (player, pick, win prob, EV) unless the reader asks for every number on the card
   const [detailed, setDetailed] = usePref("detailed_cards");
@@ -38,7 +57,7 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
   const th = (key: string, label: string, term?: Term) => (
     <th scope="col" onClick={() => toggle(key)} aria-sort="none" className="sortable">{label}{arrow(key)}{term && <> <Info term={term} /></>}</th>
   );
-  if (!picks.length) return <div className="card empty">{empty ?? <>No plays clear the current filters. Try lowering Min EV (it can go below 0) to see the closest ones.</>}</div>;
+  if (!picks.length) return empty ? <EmptyState icon={IconClock} compact title={empty.title}>{empty.body}</EmptyState> : <NoPlays filters={filters} onFilters={onFilters} />;
   return (
     <>
     <label className="group-toggle mut" title="A player's picks win or lose together, so the board shows his best one and tucks the rest behind it">

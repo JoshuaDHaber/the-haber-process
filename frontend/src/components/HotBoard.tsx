@@ -1,3 +1,5 @@
+import { IconFlame, IconSnowflake } from "@tabler/icons-react";
+import EmptyState, { focusEmpty } from "./EmptyState";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Filters, type GameWeather, type HotPick, type HotTeam } from "../api";
@@ -103,6 +105,8 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
   // the server's order (games cleared, then streak, then margin) is the default; "rank" keeps it
   const ranked = rows.map((r, i) => ({ ...r, rank: -i }));
   const { sorted, toggle, arrow } = useSort(ranked, "rank");
+  // an empty board's way out: the next shorter stretch, if there is one
+  const shorter = [...WINDOWS[league]].reverse().find((n) => n < games);
   const th = (key: string, label: string, term?: Term) => (
     <th scope="col" onClick={() => toggle(key)} aria-sort="none" className="sortable">{label}{arrow(key)}{term && <> <Info term={term} /></>}</th>
   );
@@ -118,17 +122,20 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
           {WINDOWS[league].map((n) => <button key={n} className={games === n ? "on" : ""} aria-pressed={games === n} onClick={() => setGames(n)}>{n} games</button>)}
         </div>
       </div>
-      <HowToRead storageKey="how-to-read-hot-dismissed">
+      {(rows.length > 0 || teams.length > 0) && <HowToRead storageKey="how-to-read-hot-dismissed">
         <ol>
           <li>Each row is a player whose last games {side === "Over" ? "beat" : "stayed under"} the line he's posted at now: at least 6 in 10 of them{league === "nfl" ? ", reaching into last season when this one runs short" : ""}. Bars that cleared the line are green.</li>
           <li><b>Avg</b> is those games' average, with his average in the games before them underneath.</li>
           <li>A run isn't an edge on its own: the projections already weight recent games. <b>EV</b> <Info term="ev" /> says whether the run is in the price.</li>
           {side === "Over" && <li>Teams that have won {MIN_TEAM_STREAK} or more in a row this season sit on top, with their moneyline. The price already knows they've been winning, so read the EV the same way.</li>}
         </ol>
-      </HowToRead>
+      </HowToRead>}
       {teams.length > 0 && <HotTeams teams={teams} weather={weather} />}
       {hot.isLoading ? <Skeleton kind="rows" /> : hot.error ? <p className="err">Couldn't load who's hot.</p> : !rows.length ? (
-        <div className="card empty">{teams.length > 0 && "No players on a run yet. "}Nobody on the board has {side === "Over" ? "cleared" : "stayed under"} their line that often lately. Try a shorter stretch or another market.</div>
+        <EmptyState id="no-hot" icon={side === "Over" ? IconFlame : IconSnowflake} title={teams.length > 0 ? "No players on a run yet" : `Nobody's ${side === "Over" ? "hot" : "cold"} over the last ${games} games`}
+          action={shorter && <button type="button" className="chip-btn" onClick={() => { setGames(shorter); focusEmpty("no-hot"); }}>Try the last {shorter} games</button>}>
+          No one on the board has {side === "Over" ? "cleared" : "stayed under"} their line in at least 60% of those games.{shorter ? " A shorter stretch or another market may turn some up." : " Try another market."}
+        </EmptyState>
       ) : <>
         <SortBar toggle={toggle} arrow={arrow} options={[["rank", "Hottest"], ["streak", "Streak"], ["ev", "EV"], ["name", "Name"]]} />
         <div className="card scroll cards">
