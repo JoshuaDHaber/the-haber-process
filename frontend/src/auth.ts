@@ -36,17 +36,20 @@ async function call(path: string, init: RequestInit = {}): Promise<AuthState> {
   return body as AuthState;
 }
 
-/** Set while this browser is signed in, so the next visit knows to wait for the account's settings (its sportsbook
- *  prices the board) before the first board request, rather than fetch the board twice. Visitors never wait. */
+/** The account this browser was last signed in to, so the next visit knows to wait for the account's settings (its
+ *  sportsbook prices the board) before the first board request, rather than fetch the board twice, and only puts back a
+ *  games page that account saved (persistCache.ts). Visitors never wait. */
 const SIGNED_IN = "signed-in";
-const signedInHere = () => { try { return localStorage.getItem(SIGNED_IN) === "1"; } catch { return false; } };
+/** The account this browser was last signed in to ("" for none), known before /api/auth/me answers. */
+export const lastAccount = () => { try { return localStorage.getItem(SIGNED_IN) ?? ""; } catch { return ""; } };
+const signedInHere = () => lastAccount() !== "";
 
 /** Take a fresh answer from the server: the account's saved settings win over this browser's. */
 function apply(next: AuthState, { fromSignIn = false } = {}) {
   const was = auth?.user?.email;
   auth = next;
   const user = next.user;
-  try { if (user) localStorage.setItem(SIGNED_IN, "1"); else localStorage.removeItem(SIGNED_IN); } catch { /* storage blocked */ }
+  try { if (user) localStorage.setItem(SIGNED_IN, user.email); else localStorage.removeItem(SIGNED_IN); } catch { /* storage blocked */ }
   if (user) {
     const saved = Object.fromEntries(Object.entries(user.prefs).filter(([, v]) => v != null)) as Partial<Prefs>;
     if (Object.keys(saved).length) setPrefs(saved, { save: false });

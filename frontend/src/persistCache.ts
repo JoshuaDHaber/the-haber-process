@@ -9,22 +9,27 @@ export const MAX_AGE = 6 * 3600_000;
 const BUILD = import.meta.url;
 const key = (name: string) => `query-cache:${name}`;
 
-interface Saved { build: string; books: string; at: number; state: ReturnType<typeof dehydrate> }
+/** who: the account that saved it ("" signed out); the slate says what that account may see (the owner's pages). */
+interface Saved { build: string; books: string; who: string; at: number; state: ReturnType<typeof dehydrate> }
 
-/** Put a saved cache back, if it's from this build, recent, and priced for the same sportsbooks (legal ones differ by state). */
-export function restoreCache(client: QueryClient, name: string, books: string, now = Date.now()): boolean {
+/** Put a saved cache back, if it's from this build, recent, saved by the same account and priced for the same sportsbooks
+ *  (legal ones differ by state). It's shown at once but always counts as stale, so it's fetched again on the way in and
+ *  nothing (the owner's pages, an old game link) is decided on it alone. */
+export function restoreCache(client: QueryClient, name: string, books: string, who: string, now = Date.now()): boolean {
   try {
     const raw = localStorage.getItem(key(name));
     const saved: Saved | null = raw ? JSON.parse(raw) : null;
-    if (!saved || saved.build !== BUILD || saved.books !== books || now - saved.at > MAX_AGE) return false;
+    if (!saved || saved.build !== BUILD || saved.books !== books || saved.who !== who || now - saved.at > MAX_AGE) return false;
     hydrate(client, saved.state);
+    void client.invalidateQueries({ refetchType: "none" });
     return true;
   } catch { return false; }   // storage blocked or a damaged copy: start empty
 }
 
 /** Keep `client`'s games-page queries saved as they change (a second after the last change). books(): the current
- *  sportsbooks key. Only each query's newest version is kept (one book's board, not every book looked at). */
-export function saveCache(client: QueryClient, name: string, books: () => string): () => void {
+ *  sportsbooks key; who(): the account signed in. Only each query's newest version is kept (one book's board, not every
+ *  book looked at). */
+export function saveCache(client: QueryClient, name: string, books: () => string, who: () => string): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const save = () => {
     const newest = new Map<unknown, number>();
@@ -33,7 +38,7 @@ export function saveCache(client: QueryClient, name: string, books: () => string
       if (KEEP.has(k as string) && q.state.status === "success") newest.set(k, Math.max(newest.get(k) ?? 0, q.state.dataUpdatedAt));
     }
     const state = dehydrate(client, { shouldDehydrateQuery: (q) => q.state.status === "success" && newest.get(q.queryKey[0]) === q.state.dataUpdatedAt });
-    try { localStorage.setItem(key(name), JSON.stringify({ build: BUILD, books: books(), at: Date.now(), state } satisfies Saved)); } catch { /* full or blocked: not saved */ }
+    try { localStorage.setItem(key(name), JSON.stringify({ build: BUILD, books: books(), who: who(), at: Date.now(), state } satisfies Saved)); } catch { /* full or blocked: not saved */ }
   };
   return client.getQueryCache().subscribe((e) => {
     if (e.type !== "updated" || e.action.type !== "success" || !KEEP.has(e.query.queryKey[0] as string)) return;

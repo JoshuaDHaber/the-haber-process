@@ -13,10 +13,10 @@ import { holdSharedText } from "./bets";
 import { allowedBooks } from "./legalBooks";
 import { LeagueContext } from "./LeagueContext";
 import { getLeague, setLeague as storeLeague, type League } from "./league";
-import { leagueClients as clients } from "./queryClients";
+import { leagueClients as clients, sharedClient } from "./queryClients";
 import { restoreCache, saveCache } from "./persistCache";
 import { prefetchLeague } from "./slateQueries";
-import { loadAuth } from "./auth";
+import { lastAccount, loadAuth } from "./auth";
 import "./styles.css";
 
 const Privacy = lazy(() => importOrReload(() => import("./components/Privacy")));
@@ -39,9 +39,9 @@ function Root() {
   const books = useRef(booksKey);
   books.current = booksKey;
   // the last games pages this browser saw, shown at once while they refresh; then kept saved as they change
-  useState(() => (["nfl", "nba"] as League[]).forEach((l) => restoreCache(clients[l], l, booksKey)));
+  useState(() => (["nfl", "nba"] as League[]).forEach((l) => restoreCache(clients[l], l, booksKey, lastAccount())));
   useEffect(() => {
-    const stops = (["nfl", "nba"] as League[]).map((l) => saveCache(clients[l], l, () => books.current));
+    const stops = (["nfl", "nba"] as League[]).map((l) => saveCache(clients[l], l, () => books.current, lastAccount));
     return () => stops.forEach((s) => s());
   }, []);
   // once this page has loaded, the other league in the background
@@ -54,6 +54,7 @@ function Root() {
     if (lastBooks.current === booksKey) return;
     lastBooks.current = booksKey;
     Object.values(clients).forEach((c) => c.resetQueries());
+    sharedClient.resetQueries({ queryKey: ["ladder"] });   // the slip's lines, filtered to the legal books
   }, [booksKey]);
   const setLeague = (l: League) => {
     storeLeague(l);

@@ -63,11 +63,11 @@ export default function BetSlip() {
   }, [open, needsState]);
   const metaFlags = qc.getQueryData<{ has_odds_key: boolean; can_write: boolean }>(["meta"]);
   const hasKey = !!metaFlags?.has_odds_key && !!metaFlags?.can_write;
-  // line shopping data: every book's quote for each leg's exact line (shares the drawer's query cache)
+  // line shopping data: every book's quote for each leg's exact line
   const keys = [...new Map(legs.map((l) => [`${l.playerId}|${l.kind}`, l])).values()];
   const ladders = useQueries({
     queries: keys.map((l) => ({ queryKey: ["ladder", l.playerId, l.kind, 0], queryFn: () => api.lines(l.playerId, l.kind, 0), enabled: open })),
-  });
+  }, sharedClient);   // legs from either league: kept across a league switch
   const ladderFor = (l: { playerId: string; kind: string }) => ladders[keys.findIndex((k) => k.playerId === l.playerId && k.kind === l.kind)]?.data;
   const options: Record<string, BookOption[]> = Object.fromEntries(legs.map((l) => [l.id, bookOptions(ladderFor(l), l)]));
   const coverage = bookCoverage(options);
@@ -208,7 +208,7 @@ export default function BetSlip() {
     setLinking("Fetching links…");
     try {
       for (const l of missingGames) await api.fetchAlt(l.playerId);
-      await qc.invalidateQueries({ queryKey: ["ladder"] });
+      await Promise.all([qc.invalidateQueries({ queryKey: ["ladder"] }), sharedClient.invalidateQueries({ queryKey: ["ladder"] })]);
       setLinking(null);
     } catch (e) { setLinking(`Couldn't fetch links: ${(e as Error).message}`); }
   };

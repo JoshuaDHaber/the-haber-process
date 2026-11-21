@@ -37,11 +37,11 @@ describe("the saved games page", () => {
   const store = new Map<string, string>();
   const ls = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
 
-  it("comes back on the next visit with the same books, but not when stale or priced for other books", async () => {
+  it("comes back on the next visit for the same account and books, but not when old, another account's or priced for other books", async () => {
     vi.stubGlobal("localStorage", ls);
     vi.useFakeTimers();
     const a = new QueryClient();
-    const stop = saveCache(a, "nba", () => "*");
+    const stop = saveCache(a, "nba", () => "*", () => "regular@haber.test");
     await a.fetchQuery({ queryKey: ["slate-picks", "all", null], queryFn: async () => [1] });
     vi.advanceTimersByTime(10);
     await a.fetchQuery({ queryKey: ["slate-picks", "FanDuel", null], queryFn: async () => [2] });
@@ -51,12 +51,15 @@ describe("the saved games page", () => {
     vi.useRealTimers();
 
     const b = new QueryClient();
-    expect(restoreCache(b, "nba", "*")).toBe(true);
+    expect(restoreCache(b, "nba", "*", "regular@haber.test")).toBe(true);
     expect(b.getQueryData(["slate-picks", "FanDuel", null])).toEqual([2]);   // only the newest board is kept
+    expect(b.getQueryState(["slate-picks", "FanDuel", null])?.isInvalidated).toBe(true);   // shown, but fetched again
     expect(b.getQueryData(["slate-picks", "all", null])).toBeUndefined();
     expect(b.getQueryData(["projections"])).toBeUndefined();
-    expect(restoreCache(new QueryClient(), "nba", "FanDuel")).toBe(false);   // another state's legal books
-    expect(restoreCache(new QueryClient(), "nba", "*", Date.now() + MAX_AGE + 60_000)).toBe(false);
-    expect(restoreCache(new QueryClient(), "nfl", "*")).toBe(false);
+    expect(restoreCache(new QueryClient(), "nba", "FanDuel", "regular@haber.test")).toBe(false);   // another state's legal books
+    expect(restoreCache(new QueryClient(), "nba", "*", "")).toBe(false);   // saved by an account, this visit signed out
+    expect(restoreCache(new QueryClient(), "nba", "*", "admin@haber.test")).toBe(false);   // another account's
+    expect(restoreCache(new QueryClient(), "nba", "*", "regular@haber.test", Date.now() + MAX_AGE + 60_000)).toBe(false);
+    expect(restoreCache(new QueryClient(), "nfl", "*", "regular@haber.test")).toBe(false);
   });
 });

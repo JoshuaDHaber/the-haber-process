@@ -7,6 +7,7 @@ const newClient = () => new QueryClient({ defaultOptions: { queries: { refetchOn
 /** One cache per league: both sides use the same query keys (["meta"], ["picks", ...]) for different endpoints. */
 export const leagueClients: Record<League, QueryClient> = { nfl: newClient(), nba: newClient() };
 
-/** What both leagues read the same way, so a switch doesn't fetch it again: the bet slip's projections and correlations
- *  (a slip holds legs from either league). Pass it as useQuery's second argument. */
+/** What both leagues read the same way, so a switch doesn't fetch it again: the bet slip's line ladders, projections and
+ *  correlations (a slip holds legs from either league). Pass it as useQuery's second argument. Its ladders are reset
+ *  with the leagues' caches when the legal books change (main.tsx), and refreshed with theirs after an alt-line fetch. */
 export const sharedClient = newClient();
