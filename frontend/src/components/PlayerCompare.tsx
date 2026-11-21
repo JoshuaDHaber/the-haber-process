@@ -196,7 +196,7 @@ export default function PlayerCompare({ onSelect, weather = {} }: { onSelect: (i
           </table>
         </div>
       )}
-      {players.length > 0 && <p className="mut cmp-foot">Highlighted: the higher projection in each market. Tap a number for that player's chart, lines and plays.</p>}
+      {kinds.length > 0 && <p className="mut cmp-foot">Highlighted: the higher projection in each market. Tap a number for that player's chart, lines and plays.</p>}
     </section>
   );
 }

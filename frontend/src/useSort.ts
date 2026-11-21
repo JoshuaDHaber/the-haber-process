@@ -15,5 +15,7 @@ export function useSort<T>(rows: T[], initial: keyof T & string, dir: "asc" | "d
     else { setKey(k); setD("desc"); }
   };
   const arrow = (k: string) => (k === key ? (d === "asc" ? " ▲" : " ▼") : "");
-  return { sorted, toggle, arrow };
+  /** For a sortable header's aria-sort: only the column the rows are sorted by says which way. */
+  const sortOf = (k: string): "ascending" | "descending" | undefined => (k === key ? (d === "asc" ? "ascending" : "descending") : undefined);
+  return { sorted, toggle, arrow, sortOf };
 }

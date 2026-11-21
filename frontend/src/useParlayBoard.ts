@@ -34,6 +34,9 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
     enabled, staleTime: 10 * 60_000 }, sharedClient);   // shared with the bet slip, which reads both leagues
   const corr = corrQuery.data?.pairs;
   const loading = parlayQueries.some((q) => q.isLoading);
+  // no book's props came back: the page says the load failed, rather than that there aren't enough likely plays
+  const failed = parlayQueries.length > 0 && parlayQueries.every((q) => q.error && !q.data);
+  const retry = () => Promise.all(parlayQueries.map((q) => q.refetch())).then((rs) => ({ error: rs.every((r) => r.error) ? rs[0].error : null }));
   const [book, setBook] = useState<string | null>(null);
   const parlayStamp = parlayQueries.map((q) => q.dataUpdatedAt).join() + mlQueries.map((q) => q.dataUpdatedAt).join();
   const allPicksByBook = useMemo(() => Object.fromEntries(books.map((b, i) => [b, [...parlayQueries[i]?.data ?? [],
@@ -89,7 +92,7 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
   return {
     // pickedBook: only a book the visitor chose (or a link carried), which is what goes in the address; a default left there
     // would beat their saved sportsbook on the next visit
-    parlayCounts, loading, book: activeBook, pickedBook: book && books.includes(book) ? book : null, setBook, parlays: (activeBook && byBook[activeBook]) || [], tdParlays, ladders, altProps,
+    parlayCounts, loading, failed, retry, book: activeBook, pickedBook: book && books.includes(book) ? book : null, setBook, parlays: (activeBook && byBook[activeBook]) || [], tdParlays, ladders, altProps,
     laddersLoading: ladderQueries.some((q) => q.isLoading) || threesQueries.some((q) => q.isLoading),
   };
 }

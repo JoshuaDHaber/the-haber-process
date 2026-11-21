@@ -38,7 +38,8 @@ input[type="search"] { min-width: 170px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { font-size: 12px; color: var(--mut); font-weight: 600; background: var(--card); user-select: none; }
-th.sortable { cursor: pointer; } th.sortable:hover { color: var(--ink); }
+th.sortable:hover { color: var(--ink); }
+.th-sort { all: unset; cursor: pointer; border-radius: 4px; } .th-sort:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
 th:first-child, td:first-child { text-align: left; } tr:last-child td { border-bottom: 0; }
 tr.clickable { cursor: pointer; } tr.clickable:hover, tr.clickable:focus { background: var(--chip); outline: none; }
 .pick { font-weight: 600; } .over, .pos { color: var(--good); } .under { color: var(--bad); } .pos { font-weight: 600; }
@@ -236,7 +237,7 @@ tr.clickable:hover td:last-child { border-top-right-radius: 10px; border-bottom-
 @media (max-width: 700px) {
   .sortbar { display: flex; align-items: center; gap: 6px; overflow-x: auto; margin: 0 0 10px; scrollbar-width: none; }
   .sortbar::-webkit-scrollbar { display: none; }
-  .sortbar button { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--mut); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .sortbar button { flex: none; min-height: 32px; border: 1px solid var(--line); background: var(--card); color: var(--mut); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .sortbar button.on { color: var(--bg); border-color: var(--ink); background: var(--ink); }
 
   .card.scroll.cards { background: none; border: 0; box-shadow: none; padding: 0; overflow: visible; }
@@ -1058,7 +1059,7 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .c-run .spark { margin-bottom: 2px; }
 .run-full { color: var(--good); }
 /* teams on a win streak: W/L marks like the players' sparkline bars (green cleared, grey didn't) */
-.hot-teams { margin-bottom: 14px; } .hot-teams .sub-h { margin: 0 0 8px; }
+.hot-teams { margin-bottom: 14px; } .hot-teams .sub-h, .sub-h.hot-sub { margin: 0 0 8px; }
 .wl { display: inline-flex; gap: 3px; margin-bottom: 2px; }
 .wl i { width: 18px; height: 18px; border-radius: 4px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; font-style: normal;
   background: var(--chip); color: var(--mut); }
@@ -1153,4 +1154,5 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 }
 .board-note { margin: 8px 2px 0; }
 .ladder-loading { margin: 6px 2px 12px; }
+.empty-state.error .es-icon { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .empty-state:focus { outline: none; } .empty-state:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }

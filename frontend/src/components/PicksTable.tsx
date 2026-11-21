@@ -8,7 +8,7 @@ import { filtersNarrowed } from "../route";
 import { useSort } from "../useSort";
 import EmptyState, { focusEmpty } from "./EmptyState";
 import Avatar from "./Avatar";
-import SortBar from "./SortBar";
+import SortBar, { SortTh } from "./SortBar";
 import Spark from "./Spark";
 import MatchupGrade from "./MatchupGrade";
 import WeatherChip from "./WeatherChip";
@@ -45,7 +45,7 @@ function NoPlays({ filters, onFilters }: { filters?: Filters; onFilters?: (f: Fi
 
 /** picks arrive best EV first. limit shows only the top rows (after grouping) with a "Show all" button, as on the game pages.
  *  empty: what a game page says with no props yet; the boards instead pass their filters, for buttons that loosen them. */
-export default function PicksTable({ picks, onSelect, weather = {}, empty, limit, filters, onFilters }: { picks: Pick[]; onSelect: (p: Pick) => void;
+export default function PicksTable({ picks, onSelect, weather = {}, empty, limit, filters, onFilters, busy = false }: { picks: Pick[]; onSelect: (p: Pick) => void; busy?: boolean;
   weather?: Record<string, GameWeather | null | undefined>; empty?: { title: string; body: string }; limit?: number; filters?: Filters; onFilters?: (f: Filters) => void }) {
   const [grouped, setGrouped] = usePref("one_per_player");
   // phones: compact cards (player, pick, win prob, EV) unless the reader asks for every number on the card
@@ -53,9 +53,9 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
   const [showAll, setShowAll] = useState(false);
   const rows: GroupedPick[] = useMemo(() => grouped ? onePerPlayer(picks) : picks.map((p) => ({ ...p, related: [] })), [picks, grouped]);
   const shown = useMemo(() => (limit && !showAll ? rows.slice(0, limit) : rows), [rows, limit, showAll]);
-  const { sorted, toggle, arrow } = useSort(shown, "ev");
+  const { sorted, toggle, arrow, sortOf } = useSort(shown, "ev");
   const th = (key: string, label: string, term?: Term) => (
-    <th scope="col" onClick={() => toggle(key)} aria-sort="none" className="sortable">{label}{arrow(key)}{term && <> <Info term={term} /></>}</th>
+    <SortTh k={key} label={label} extra={term && <Info term={term} />} toggle={toggle} arrow={arrow} sortOf={sortOf} />
   );
   if (!picks.length) return empty ? <EmptyState icon={IconClock} compact title={empty.title}>{empty.body}</EmptyState> : <NoPlays filters={filters} onFilters={onFilters} />;
   return (
@@ -68,7 +68,7 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
       <input type="checkbox" checked={detailed} onChange={(e) => setDetailed(e.target.checked)} /> Every number on the cards
     </label>
     <SortBar toggle={toggle} arrow={arrow} options={[["ev", "EV"], ["prob", "Win prob"], ["edge_yds", "Edge"], ["mu", "Proj"], ["name", "Name"]]} />
-    <div className={`card scroll cards${detailed ? "" : " compact"}`}>
+    <div className={`card scroll cards${detailed ? "" : " compact"}${busy ? " refreshing" : ""}`} aria-busy={busy}>
       <table className="t-picks">
         <thead>
           <tr>

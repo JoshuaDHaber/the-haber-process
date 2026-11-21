@@ -6,7 +6,7 @@ import { filtersNarrowed } from "../route";
 import { useSort } from "../useSort";
 import EmptyState from "./EmptyState";
 import Avatar from "./Avatar";
-import SortBar from "./SortBar";
+import SortBar, { SortTh } from "./SortBar";
 import Spark from "./Spark";
 import WeatherChip from "./WeatherChip";
 import MatchupGrade from "./MatchupGrade";
@@ -14,12 +14,12 @@ import MatchupGrade from "./MatchupGrade";
 export const THIN_TITLE = "Only a game or two of history (a rookie, or back from IR): a rough guess, shown for reference and never priced";
 
 /** filters: the board's, so an empty board can point at the ones hiding rows (a game page has none). */
-export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false, filters }: { rows: Projection[]; onSelect: (p: Projection) => void;
+export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false, filters, busy = false }: { rows: Projection[]; onSelect: (p: Projection) => void; busy?: boolean;
   weather?: Record<string, GameWeather | null | undefined>; nba?: boolean; filters?: Filters }) {
-  const { sorted, toggle, arrow } = useSort(rows, "mu");
+  const { sorted, toggle, arrow, sortOf } = useSort(rows, "mu");
   const { visible, more, showMore, sentinel } = useIncremental(sorted);
   const th = (key: string, label: string, title?: string) => (
-    <th scope="col" onClick={() => toggle(key)} title={title} className="sortable">{label}{arrow(key)}</th>
+    <SortTh k={key} label={label} title={title} toggle={toggle} arrow={arrow} sortOf={sortOf} />
   );
   // the filter chips above already clear each filter (and "Clear all"), so the message points there instead of repeating them
   if (!rows.length) return (
@@ -30,7 +30,7 @@ export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = f
   return (
     <>
     <SortBar toggle={toggle} arrow={arrow} options={[["mu", "Proj"], ["vol", "Volume"], ["eff", "Efficiency"], ["spread", "Spread"], ["name", "Name"]]} />
-    <div className="card scroll cards">
+    <div className={`card scroll cards${busy ? " refreshing" : ""}`} aria-busy={busy}>
       <table className="t-proj">
         <thead>
           <tr>

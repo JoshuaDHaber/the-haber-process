@@ -14,7 +14,7 @@ import ParlayTiles from "./ParlayTiles";
 import PicksTable from "./PicksTable";
 import ProjectionsTable from "./ProjectionsTable";
 import { checkBack } from "../sync";
-import EmptyState from "./EmptyState";
+import EmptyState, { LoadError } from "./EmptyState";
 import Skeleton from "./Skeleton";
 
 interface Props {
@@ -101,14 +101,14 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>
         <KindSeg value={propKind} onChange={setPropKind} />
-        {picks.isLoading ? <Skeleton kind="rows" /> : <>
-          <PicksTable key={propKind} picks={picks.data ?? []} limit={PROPS_SHOWN} weather={{ [id]: game.weather }} empty={{ title: "No positive-EV props for this game yet", body: "Books post props mid-week; the scheduled syncs pick them up." }} onSelect={(p) => onSelect(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />
+        {picks.isLoading ? <Skeleton kind="rows" /> : picks.error && !picks.data ? <LoadError compact what="this game's props" retry={picks.refetch} /> : <>
+          <PicksTable key={propKind} picks={picks.data ?? []} busy={picks.isPlaceholderData} limit={PROPS_SHOWN} weather={{ [id]: game.weather }} empty={{ title: "No positive-EV props for this game yet", body: "Books post props mid-week; the scheduled syncs pick them up." }} onSelect={(p) => onSelect(p.player_id, p.kind, { side: p.side, line: p.line, book: p.book })} />
         </>}
       </section>
 
       <section id="go-parlays" className="go-sec">
         <h2 className="parlay-h">Parlays <small>built from this game only</small></h2>
-        {board.loading ? <Skeleton kind="cards" /> :
+        {board.loading ? <Skeleton kind="cards" /> : board.failed ? <LoadError compact what="parlays" retry={board.retry} /> :
           <ParlayTiles book={board.book} games={[game]} selectedGames={chosen} parlays={board.parlays}
             tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={onSelect} />}
       </section>
@@ -116,13 +116,13 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
       <section id="go-proj" className="go-sec">
         <h2 className="parlay-h">Projections</h2>
         <KindSeg value={projKind} onChange={setProjKind} />
-        {projections.isLoading ? <Skeleton kind="rows" /> :
-          <ProjectionsTable rows={projections.data ?? []} weather={{ [id]: game.weather }} onSelect={(p) => onSelect(p.player_id, p.kind)} />}
+        {projections.isLoading ? <Skeleton kind="rows" /> : projections.error && !projections.data ? <LoadError compact what="this game's projections" retry={projections.refetch} /> :
+          <ProjectionsTable rows={projections.data ?? []} busy={projections.isPlaceholderData} weather={{ [id]: game.weather }} onSelect={(p) => onSelect(p.player_id, p.kind)} />}
       </section>
 
       <section id="go-inj" className="go-sec">
         <h2 className="parlay-h">Injuries <label className="check go-reserve"><input type="checkbox" checked={showReserve} onChange={(e) => setShowReserve(e.target.checked)} /> Show IR / PUP</label></h2>
-        {injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <p className="err">Couldn't load the injury report.</p> :
+        {injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <LoadError compact what="the injury report" retry={injuries.refetch} /> :
           <GameInjuries game={game} report={injuries.data} showReserve={showReserve} onSelect={onSelect} />}
       </section>
     </div>
