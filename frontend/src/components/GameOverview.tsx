@@ -95,7 +95,7 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
 
       <div className="go-top">
         <GameWeather game={game} fit={fit} />
-        {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? null : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
+        {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? <Skeleton kind="card" label="Loading win chances…" /> : moneylines.error && !moneylines.data ? <LoadError compact what="win chances" retry={moneylines.refetch} /> : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
       </div>
 
       <section id="go-props" className="go-sec">

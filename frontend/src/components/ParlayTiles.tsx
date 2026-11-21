@@ -13,6 +13,7 @@ import Info from "./Info";
 import SidePill from "./SidePill";
 import { PickAvatar } from "./TeamLogo";
 import EmptyState from "./EmptyState";
+import Skeleton from "./Skeleton";
 
 const STAKE = 10;
 /** Whether the comparison table was left open, remembered per browser. */
@@ -261,7 +262,7 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
             {rows.length > 1 && <h3 className="ladder-row-h">{row.label} <small>{row.tiles.length}</small></h3>}
             <Row tiles={row.tiles} onSelect={onSelect} label={`${row.label} ladders`} />
           </section>))
-        : laddersLoading ? <p className="mut ladder-loading" role="status">Loading alternate lines…</p>
+        : laddersLoading ? <Skeleton kind="tiles" label="Loading alternate lines…" />
         : <EmptyState compact title={`No ladders at ${book ?? "this sportsbook"} between +100 and +300`}>
             Ladders need alternate lines with betslip links. {nba ? "NBA alternate lines come with the day-of props syncs, and not" : "Not"} every book links them, so another book may have some.
           </EmptyState>}

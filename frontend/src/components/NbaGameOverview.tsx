@@ -85,7 +85,7 @@ export default function NbaGameOverview({ game, books, book, onBook, marketWeigh
       <GamePlayerSearch rows={roster.data ?? []} onSelect={onSelect} />
 
       {ml ? (ml.blowout ? <div className="go-top"><MoneylineCard g={ml} records={game.records} /><BlowoutCard g={ml} /></div> : <MoneylineCard g={ml} records={game.records} />)
-        : moneylines.isLoading ? null : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
+        : moneylines.isLoading ? <Skeleton kind="card" label="Loading win chances…" /> : moneylines.error && !moneylines.data ? <LoadError compact what="win chances" retry={moneylines.refetch} /> : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>
