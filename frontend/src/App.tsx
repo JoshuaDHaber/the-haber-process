@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Filters, type Kind } from "./api";
+import { api, type Filters, type Kind, type Meta } from "./api";
+import { useSettingsReady } from "./auth";
+import { slateQueries } from "./slateQueries";
 import BetSlip from "./components/BetSlip";
 import Controls from "./components/Controls";
 import GameOverview from "./components/GameOverview";
@@ -36,7 +38,7 @@ import { useSelectedPlayer } from "./playerHash";
 import Methodology from "./components/Methodology";
 import { useDebounced } from "./useDebounced";
 import { routeClick } from "./components/NavLink";
-import { PARLAY_FILTERS, useParlayBoard } from "./useParlayBoard";
+import { useParlayBoard } from "./useParlayBoard";
 import Skeleton from "./components/Skeleton";
 import { BASE } from "./env";
 
@@ -106,25 +108,34 @@ function PublicApp() {
   const [promo, setPromo] = useState<Promo>(() => (param("promo") === "endzone" ? "endzone" : "early-win"));
   const [endzoneGame, setEndzoneGame] = useState<string | null>(() => param("promo_game"));
 
-  const meta = useQuery({ queryKey: ["meta"], queryFn: api.meta });
+  // the games page's four reads go out as one request (slateQueries.ts); on a signed-in visit they wait for the account's
+  // sportsbook, so the board isn't fetched at a stale book first. The filters follow a new account book a render late
+  // (the effect above), so the board's book is worked out here the same way.
+  const settingsReady = useSettingsReady();
+  const book = filters.book === lastBoardBook.current ? boardBook : filters.book;
+  const slate = slateQueries<Meta>("nfl", book, debounced.marketWeight);
+  const meta = useQuery({ ...slate.meta, enabled: settingsReady || tab !== "games" || !!gameId });
+  // the slate as this visit fetched it, or still fresh from before (not a copy saved on an earlier visit, which may
+  // lack a game added since): only that sends a game link or the owner's page elsewhere
+  const metaFresh = meta.isFetchedAfterMount || (!!meta.data && !meta.isStale);
   useDocumentTitle(!knownPath ? "Page not found" : gameId ? meta.data?.games.find((g) => g.game_id === gameId)?.label : TITLE[tab]);
   // Model check is the owner's: anyone else following a /model link lands on the games (Admin keeps its own sign-in card)
   const owner = meta.data?.can_write;
-  useEffect(() => { if (tab === "model" && owner === false) goSection("games", { replace: true }); }, [tab, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === "model" && metaFresh && owner === false) goSection("games", { replace: true }); }, [tab, owner, metaFresh]); // eslint-disable-line react-hooks/exhaustive-deps
   // odds over six hours old: the slip asks the bettor to check prices before handing legs to a book
   const { setStaleSince } = useBetSlip();
   const oddsAt = meta.data ? latestFetch(meta.data.odds) : undefined;
   const stale = !!oddsAt && oddsLevel(oddsAt) === "stale";
   useEffect(() => setStaleSince(stale ? oddsAt! : null), [stale, oddsAt, setStaleSince]);
   // a game page counts as open only for a game still on the slate (assumed so until the slate loads)
-  const gameOpen = !!gameId && (!meta.data || meta.data.games.some((g) => g.game_id === gameId));
+  const gameOpen = !!gameId && (!metaFresh || !meta.data || meta.data.games.some((g) => g.game_id === gameId));
   // an old link (#game=<a game no longer on the slate>) drops the hash and lands on the slate
   useEffect(() => {
-    if (!gameId || !meta.data || meta.data.games.some((g) => g.game_id === gameId)) return;
+    if (!gameId || !metaFresh || !meta.data || meta.data.games.some((g) => g.game_id === gameId)) return;
     pushedGame.current = false;
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setGameId(null);
-  }, [gameId, meta.data]);
+  }, [gameId, meta.data, metaFresh]);
   const picks = useQuery({ queryKey: ["picks", debounced], queryFn: () => api.picks(debounced), enabled: tab === "picks", placeholderData: (p) => p });
   const [parlayGames, setParlayGames] = useState<string[]>(() => (tab === "parlays" && param("games")?.split(",").filter(Boolean)) || []);
   // only games still on the slate count; every parlay and ladder is built from the chosen games' picks
@@ -142,11 +153,10 @@ function PublicApp() {
       : tab === "promos" ? { promo: promo === "early-win" ? null : promo, promo_game: promo === "endzone" ? endzoneGame : null } : {});
   }, [tab, gameId, filters, board.pickedBook, parlayGames, boardBook, promo, endzoneGame]);
   // positive-EV plays across the slate, for the game tiles' top prop and counts
-  const slatePicks = useQuery({ queryKey: ["slate-picks", debounced.book, debounced.marketWeight],
-    queryFn: () => api.picks({ ...PARLAY_FILTERS, book: debounced.book, marketWeight: debounced.marketWeight, minEv: 0 }, 1000), enabled: tab === "games" && !gameOpen });
-  const moneylines = useQuery({ queryKey: ["moneylines", debounced.book, debounced.marketWeight], queryFn: () => api.moneylines(debounced.book, debounced.marketWeight),
-    enabled: tab === "games" && !gameOpen, placeholderData: (p) => p });
-  const injuries = useQuery({ queryKey: ["injuries"], queryFn: api.injuries, enabled: tab === "injuries" || (tab === "games" && !gameOpen), refetchInterval: 15 * 60_000 });
+  const onSlate = tab === "games" && !gameOpen;
+  const slatePicks = useQuery({ ...slate.picks, enabled: onSlate && settingsReady });
+  const moneylines = useQuery({ ...slate.moneylines, enabled: onSlate && settingsReady, placeholderData: (p) => p });
+  const injuries = useQuery({ ...slate.injuries, enabled: tab === "injuries" || (onSlate && settingsReady), refetchInterval: 15 * 60_000 });
   const hot = useHotBoard(debounced, tab === "hot");
   const projections = useQuery({ queryKey: ["projections", debounced], queryFn: () => api.projections(debounced), enabled: tab === "projections", placeholderData: (p) => p });
 

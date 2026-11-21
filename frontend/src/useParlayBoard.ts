@@ -1,4 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { sharedClient } from "./queryClients";
 import { useMemo, useState } from "react";
 import { api, type Filters } from "./api";
 import { getLeague } from "./league";
@@ -30,7 +31,7 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
   });
   // same-game correlations from the league's latest run (without them, legs are priced as independent)
   const corrQuery = useQuery({ queryKey: [hasTd ? "correlations" : "nba-correlations"], queryFn: hasTd ? api.correlations : api.nbaCorrelations,
-    enabled, staleTime: 10 * 60_000 });
+    enabled, staleTime: 10 * 60_000 }, sharedClient);   // shared with the bet slip, which reads both leagues
   const corr = corrQuery.data?.pairs;
   const loading = parlayQueries.some((q) => q.isLoading);
   const [book, setBook] = useState<string | null>(null);

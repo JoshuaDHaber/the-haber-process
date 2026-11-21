@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import AuthLayer from "./components/SignIn";
 import SignInLink from "./components/SignInLink";
@@ -13,6 +13,10 @@ import { holdSharedText } from "./bets";
 import { allowedBooks } from "./legalBooks";
 import { LeagueContext } from "./LeagueContext";
 import { getLeague, setLeague as storeLeague, type League } from "./league";
+import { leagueClients as clients, sharedClient } from "./queryClients";
+import { restoreCache, saveCache } from "./persistCache";
+import { prefetchLeague } from "./slateQueries";
+import { lastAccount, loadAuth } from "./auth";
 import "./styles.css";
 
 const Privacy = lazy(() => importOrReload(() => import("./components/Privacy")));
@@ -22,9 +26,8 @@ const PAGES: Record<string, () => React.ReactNode> = {
   [`${BASE}privacy`]: () => <Suspense fallback={null}><Privacy /></Suspense>,
 };
 
-const newClient = () => new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 30_000 } } });
-// one cache per league: both sides use the same query keys (["meta"], ["picks", ...]) for different endpoints
-const clients: Record<League, QueryClient> = { nfl: newClient(), nba: newClient() };
+const other = (l: League): League => (l === "nba" ? "nfl" : "nba");
+const whenIdle = (f: () => void) => ("requestIdleCallback" in window ? window.requestIdleCallback(f, { timeout: 4000 }) : setTimeout(f, 2000));
 
 function Root() {
   const [league, setLeagueState] = useState<League>(getLeague);
@@ -33,11 +36,25 @@ function Root() {
   const allowed = allowedBooks(state, allBooks);
   setAllowedBooks(allowed);
   const booksKey = allowed?.join() ?? "*";
+  const books = useRef(booksKey);
+  books.current = booksKey;
+  // the last games pages this browser saw, shown at once while they refresh; then kept saved as they change
+  useState(() => (["nfl", "nba"] as League[]).forEach((l) => restoreCache(clients[l], l, booksKey, lastAccount())));
+  useEffect(() => {
+    const stops = (["nfl", "nba"] as League[]).map((l) => saveCache(clients[l], l, () => books.current, lastAccount));
+    return () => stops.forEach((s) => s());
+  }, []);
+  // once this page has loaded, the other league in the background
+  useEffect(() => {
+    const ready = () => whenIdle(() => prefetchLeague(other(getLeague())));
+    if (document.readyState === "complete") ready(); else window.addEventListener("load", ready, { once: true });
+  }, []);
   const lastBooks = useRef(booksKey);
   useEffect(() => {
     if (lastBooks.current === booksKey) return;
     lastBooks.current = booksKey;
     Object.values(clients).forEach((c) => c.resetQueries());
+    sharedClient.resetQueries({ queryKey: ["ladder"] });   // the slip's lines, filtered to the legal books
   }, [booksKey]);
   const setLeague = (l: League) => {
     storeLeague(l);
@@ -65,6 +82,7 @@ function Root() {
   );
 }
 
+void loadAuth();    // now, alongside the first render: a signed-in visit's board waits for the account's sportsbook
 holdSharedText();   // a slip from the iPhone Shortcut (/bets#slip=...), before the app reads the address
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

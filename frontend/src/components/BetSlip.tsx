@@ -1,6 +1,7 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { sharedClient } from "../queryClients";
 import { useAuth } from "../auth";
 import { boostPct, deleteBet, editBet, legLeague, money, NO_PROMO, promoBody, promoReady, promoReturn, refundOf, trackBets, type Promo, type PromoBody } from "../bets";
 import PromoFields from "./PromoFields";
@@ -62,11 +63,11 @@ export default function BetSlip() {
   }, [open, needsState]);
   const metaFlags = qc.getQueryData<{ has_odds_key: boolean; can_write: boolean }>(["meta"]);
   const hasKey = !!metaFlags?.has_odds_key && !!metaFlags?.can_write;
-  // line shopping data: every book's quote for each leg's exact line (shares the drawer's query cache)
+  // line shopping data: every book's quote for each leg's exact line
   const keys = [...new Map(legs.map((l) => [`${l.playerId}|${l.kind}`, l])).values()];
   const ladders = useQueries({
     queries: keys.map((l) => ({ queryKey: ["ladder", l.playerId, l.kind, 0], queryFn: () => api.lines(l.playerId, l.kind, 0), enabled: open })),
-  });
+  }, sharedClient);   // legs from either league: kept across a league switch
   const ladderFor = (l: { playerId: string; kind: string }) => ladders[keys.findIndex((k) => k.playerId === l.playerId && k.kind === l.kind)]?.data;
   const options: Record<string, BookOption[]> = Object.fromEntries(legs.map((l) => [l.id, bookOptions(ladderFor(l), l)]));
   const coverage = bookCoverage(options);
@@ -88,11 +89,12 @@ export default function BetSlip() {
   const stakeFor = (book: string) => stakes[book] ?? 10;
   // same-game legs: positions (slip legs don't carry them) and the correlations, only once a book's legs share a game
   const needCorr = open && legs.some((l, i) => legs.some((m, j) => j > i && m.gameId === l.gameId && m.book === l.book));
-  // both leagues' (a slip can hold either); their market names differ, so one table holds both without clashing
-  const nflProj = useQuery({ queryKey: ["nfl-projections"], queryFn: api.nflProjections, enabled: needCorr, staleTime: 10 * 60_000 });
-  const nbaProj = useQuery({ queryKey: ["nba-projections"], queryFn: api.nbaProjections, enabled: needCorr, staleTime: 10 * 60_000 });
-  const corrQuery = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, enabled: needCorr, staleTime: 10 * 60_000 });
-  const nbaCorrQuery = useQuery({ queryKey: ["nba-correlations"], queryFn: api.nbaCorrelations, enabled: needCorr, staleTime: 10 * 60_000 });
+  // both leagues' (a slip can hold either); their market names differ, so one table holds both without clashing. In the
+  // cache both leagues share, so switching league doesn't download them again (the NBA's projections are ~200 KB)
+  const nflProj = useQuery({ queryKey: ["nfl-projections"], queryFn: api.nflProjections, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const nbaProj = useQuery({ queryKey: ["nba-projections"], queryFn: api.nbaProjections, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const corrQuery = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const nbaCorrQuery = useQuery({ queryKey: ["nba-correlations"], queryFn: api.nbaCorrelations, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
   const positions = useMemo(() => Object.fromEntries([...(nflProj.data ?? []), ...(nbaProj.data ?? [])].map((p) => [p.player_id, p.pos])),
     [nflProj.data, nbaProj.data]);
   const corr = useMemo(() => ({ ...corrQuery.data?.pairs, ...nbaCorrQuery.data?.pairs }), [corrQuery.data, nbaCorrQuery.data]);
@@ -206,7 +208,7 @@ export default function BetSlip() {
     setLinking("Fetching links…");
     try {
       for (const l of missingGames) await api.fetchAlt(l.playerId);
-      await qc.invalidateQueries({ queryKey: ["ladder"] });
+      await Promise.all([qc.invalidateQueries({ queryKey: ["ladder"] }), sharedClient.invalidateQueries({ queryKey: ["ladder"] })]);
       setLinking(null);
     } catch (e) { setLinking(`Couldn't fetch links: ${(e as Error).message}`); }
   };

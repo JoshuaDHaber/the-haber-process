@@ -35,7 +35,7 @@ from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
 from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
-                      RefreshRequest, RunInfo, SiteSettings)
+                      RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -49,6 +49,7 @@ async def lifespan(_: FastAPI):
     scheduler.after_job = _release_memory
     if scheduler.start():
         print("Scheduled syncs are on (AUTO_SYNC)")
+        threading.Thread(target=_warm_loop, daemon=True).start()
         # no schedule yet (a new volume, or a cleared cache): fetch it now rather than at the next sync
         if data.cached_schedule() is None:
             threading.Thread(target=_fetch_schedule, daemon=True).start()
@@ -215,6 +216,40 @@ def _release_memory():
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except (OSError, AttributeError):
         pass  # not glibc (e.g. macOS): nothing to trim
+    _warm_now.set()
+
+
+# ---------- warm caches ----------
+# A sync brings new odds or a new run, which empties the boards' caches, and whoever asked next paid for the rebuild: the
+# newest lines, then pricing every quote. On the host's shared CPU that took seconds (16 s once for the NBA board), so a
+# thread rebuilds them as soon as a job ends, at startup, and every 15 minutes, when the injury reports are re-read.
+_warm_now = threading.Event()
+WARM_EVERY = 900   # the injury reports' slot (_injury_report, nba_routes._injuries)
+
+
+def warm_caches() -> None:
+    """Build what the games page asks for, in both leagues, the way a visitor's first request would."""
+    t = time.time()
+    try:
+        with SessionLocal() as db:
+            run = latest_run(db)
+            m = build_meta(db)
+            if run:
+                for book in [None, *m.books]:   # the board at every book (one pricing serves them all) and at each one
+                    all_picks(db, run, None, book)
+                build_moneylines(db, run)
+                build_injuries(db, run)
+    except Exception as e:   # a request builds it instead
+        print(f"Couldn't warm the NFL caches: {e}")
+    nba_routes.warm_caches()
+    print(f"Warmed the board caches in {time.time() - t:.1f}s")
+
+
+def _warm_loop() -> None:
+    while True:
+        warm_caches()
+        _warm_now.wait(WARM_EVERY - time.time() % WARM_EVERY + 5)   # just after the next slot starts, or when a job ends
+        _warm_now.clear()
 
 
 # ---------- routes ----------
@@ -524,6 +559,20 @@ def _injury_report(season: int, week: int, _slot: int) -> tuple[dict, Optional[s
     rep = injm.build(data.load_injuries(season), data.load_reserve(season), week,
                      espn=espn, espn_ids=data.load_espn_ids(season) if espn is not None else None)
     return rep, news_fetched
+
+
+@app.get("/api/slate", response_model=Slate)
+def slate(request: Request, book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1),
+          parts: str = "meta,picks,moneylines,injuries", db: Session = Depends(get_db)):
+    """The games page in one request instead of four: the slate (meta), its plays at any edge (the tiles' top prop and
+    counts), the moneylines and the injury report, each as its own endpoint returns it. parts: which of them to send."""
+    want = set(parts.split(","))
+    return Slate(
+        meta=meta(request, db) if "meta" in want else None,
+        picks=picks(kind=None, exclude_kind="td", side=None, game_id=None, q=None, book=book, min_ev=0, market_weight=market_weight,
+                    include_flagged=False, limit=1000, db=db) if "picks" in want else None,
+        moneylines=moneylines(book=book, market_weight=market_weight, lead_by=early_win.THRESHOLD, db=db) if "moneylines" in want else None,
+        injuries=injuries(db) if "injuries" in want else None)
 
 
 @app.get("/api/player-search", response_model=list[PlayerHit])

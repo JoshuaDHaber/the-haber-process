@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { sharedClient } from "../queryClients";
 import { useMemo, useState } from "react";
 import { api, type Kind, type LadderRow, type QuoteSide } from "../api";
 import { useBetSlip } from "../BetSlipContext";
@@ -60,7 +61,11 @@ export default function LineLadder({ ctx, kind, mu, book, onBookChange, marketWe
   const ladder = useQuery({ queryKey: ["ladder", ctx.playerId, kind, oddsRange, marketWeight], queryFn: () => api.lines(ctx.playerId, kind, oddsRange, marketWeight) });
   const fetchAlt = useMutation({
     mutationFn: () => api.fetchAlt(ctx.playerId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ladder", ctx.playerId] }); qc.invalidateQueries({ queryKey: ["picks"] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ladder", ctx.playerId] });
+      sharedClient.invalidateQueries({ queryKey: ["ladder", ctx.playerId] });   // the bet slip's copy of this player's lines
+      qc.invalidateQueries({ queryKey: ["picks"] });
+    },
   });
 
   const onlyBook = book !== "all";
