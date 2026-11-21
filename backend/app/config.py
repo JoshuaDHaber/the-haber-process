@@ -60,4 +60,7 @@ EMAIL_FROM = lambda: os.environ.get("EMAIL_FROM", "The Haber Process <signin@jdh
 # reading bet slip screenshots on My bets (app/bet_screens.py); unset, the upload button doesn't show
 ANTHROPIC_API_KEY = lambda: os.environ.get("ANTHROPIC_API_KEY")
 ADMIN_EMAILS = lambda: {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+# a request from this machine is admin (the way back in on the host). LOCAL_IS_ADMIN=0 turns that off, so a laptop shows
+# the site as a visitor or a signed-in member sees it (testing with app/dev_users.py's accounts)
+LOCAL_IS_ADMIN = lambda: os.environ.get("LOCAL_IS_ADMIN", "1") != "0"
 FRONTEND_DIST =os.path.join(os.path.dirname(BASE_DIR), "frontend", "dist")

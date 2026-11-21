@@ -70,9 +70,10 @@ def client_key(request: Request) -> str:
 def is_admin(request: Request) -> bool:
     """May change data and spend API credits: a request from this machine (a laptop running the app, or a shell on the
     host: the way back in if the owner's account is ever unreachable), or a signed-in, 21+ account in ADMIN_EMAILS.
-    The old admin password (ADMIN_TOKEN, a Bearer header) is retired: accounts replaced it."""
+    The old admin password (ADMIN_TOKEN, a Bearer header) is retired: accounts replaced it. LOCAL_IS_ADMIN=0 drops the
+    this-machine rule, to see the site as a non-admin locally."""
     host = request.client.host if request.client else ""
-    return host in LOCAL_HOSTS or auth.is_admin_user(auth.request_user(request))
+    return (host in LOCAL_HOSTS and config.LOCAL_IS_ADMIN()) or auth.is_admin_user(auth.request_user(request))
 
 
 PUBLIC_WRITES = ("/api/auth/", "/api/me/")   # each route checks the signed-in user and Origin itself
