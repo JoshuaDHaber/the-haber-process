@@ -24,12 +24,17 @@ describe("team colors", () => {
     expect(teamLogo("WAS")).toContain("/wsh.png");
     expect(teamLogo("XYZ")).toBeNull();
   });
+  it("asks ESPN for a logo scaled to the size shown, snapped to a few sizes, or the original when larger", () => {
+    expect(teamLogo("KC", "nfl", 44)).toBe("https://a.espncdn.com/combiner/i?img=/i/teamlogos/nfl/500/kc.png&w=80&h=80");
+    expect(teamLogo("KC", "nfl", 24)).toContain("&w=40&h=40");
+    expect(teamLogo("KC", "nfl", 400)).toBe("https://a.espncdn.com/i/teamlogos/nfl/500/kc.png");
+  });
 });
 
 describe("NBA teams", () => {
   it("use NBA logos and colors while the NBA is on screen, NFL ones otherwise", () => {
     setLeague("nba");
-    expect(teamLogo("GS")).toBe("https://a.espncdn.com/i/teamlogos/nba/500/gs.png");
+    expect(teamLogo("GS")).toBe("https://a.espncdn.com/combiner/i?img=/i/teamlogos/nba/500/gs.png&w=80&h=80");
     const [nbaDal] = matchupColors("DAL", "DEN");
     setLeague("nfl");
     expect(teamLogo("GS")).toBeNull();

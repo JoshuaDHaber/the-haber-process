@@ -839,3 +839,19 @@ class SlipOut(BaseModel):
     legs: list[dict]
     stakes: dict[str, float]
     updated_at: Optional[str] = None   # None: nothing saved yet
+
+
+class Slate(BaseModel):
+    """The games page in one request (GET /api/slate): each part the client asked for, the same as its own endpoint returns."""
+    meta: Optional[Meta] = None
+    picks: Optional[list[PickOut]] = None
+    moneylines: Optional[list[MoneylineGame]] = None
+    injuries: Optional[InjuryReport] = None
+
+
+class NbaSlate(BaseModel):
+    """The NBA games page in one request (GET /api/nba/slate)."""
+    meta: Optional[NbaMeta] = None
+    picks: Optional[list[PickOut]] = None
+    moneylines: Optional[list[MoneylineGame]] = None
+    injuries: Optional[InjuryReport] = None

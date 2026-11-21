@@ -1,6 +1,7 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { sharedClient } from "../queryClients";
 import { useAuth } from "../auth";
 import { boostPct, deleteBet, editBet, legLeague, money, NO_PROMO, promoBody, promoReady, promoReturn, refundOf, trackBets, type Promo, type PromoBody } from "../bets";
 import PromoFields from "./PromoFields";
@@ -88,11 +89,12 @@ export default function BetSlip() {
   const stakeFor = (book: string) => stakes[book] ?? 10;
   // same-game legs: positions (slip legs don't carry them) and the correlations, only once a book's legs share a game
   const needCorr = open && legs.some((l, i) => legs.some((m, j) => j > i && m.gameId === l.gameId && m.book === l.book));
-  // both leagues' (a slip can hold either); their market names differ, so one table holds both without clashing
-  const nflProj = useQuery({ queryKey: ["nfl-projections"], queryFn: api.nflProjections, enabled: needCorr, staleTime: 10 * 60_000 });
-  const nbaProj = useQuery({ queryKey: ["nba-projections"], queryFn: api.nbaProjections, enabled: needCorr, staleTime: 10 * 60_000 });
-  const corrQuery = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, enabled: needCorr, staleTime: 10 * 60_000 });
-  const nbaCorrQuery = useQuery({ queryKey: ["nba-correlations"], queryFn: api.nbaCorrelations, enabled: needCorr, staleTime: 10 * 60_000 });
+  // both leagues' (a slip can hold either); their market names differ, so one table holds both without clashing. In the
+  // cache both leagues share, so switching league doesn't download them again (the NBA's projections are ~200 KB)
+  const nflProj = useQuery({ queryKey: ["nfl-projections"], queryFn: api.nflProjections, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const nbaProj = useQuery({ queryKey: ["nba-projections"], queryFn: api.nbaProjections, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const corrQuery = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
+  const nbaCorrQuery = useQuery({ queryKey: ["nba-correlations"], queryFn: api.nbaCorrelations, enabled: needCorr, staleTime: 10 * 60_000 }, sharedClient);
   const positions = useMemo(() => Object.fromEntries([...(nflProj.data ?? []), ...(nbaProj.data ?? [])].map((p) => [p.player_id, p.pos])),
     [nflProj.data, nbaProj.data]);
   const corr = useMemo(() => ({ ...corrQuery.data?.pairs, ...nbaCorrQuery.data?.pairs }), [corrQuery.data, nbaCorrQuery.data]);

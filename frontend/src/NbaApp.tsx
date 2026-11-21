@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { api, type BacktestStat, type Filters, type Game, type InjuryReport, type Kind } from "./api";
+import { api, type BacktestStat, type Filters, type Game, type InjuryReport, type Kind, type NbaMeta } from "./api";
+import { useSettingsReady } from "./auth";
+import { metaQuery, slateQueries } from "./slateQueries";
 import BookSelect from "./components/BookSelect";
 import GamePills from "./components/GamePills";
 import Freshness, { StaleBanner, latestFetch, oddsLevel } from "./components/Freshness";
@@ -100,24 +102,29 @@ export default function NbaApp() {
   // which promotion the Promos page shows (Early win by default)
   const [promo, setPromo] = useState<Promo>(() => (param("promo") === "king" ? "king" : "early-win"));
 
-  // the drawer and ladder read ["meta"] from the cache, so the NBA meta lives under the same key (this league has its own cache)
-  const meta = useQuery({ queryKey: ["meta"], queryFn: api.nbaMeta });
+  // the games page's four reads go out as one request (slateQueries.ts); on a signed-in visit they wait for the account's
+  // sportsbook, so the board isn't fetched at a stale book first
+  const settingsReady = useSettingsReady();
+  const meta = useQuery({ ...metaQuery<NbaMeta>("nba"), enabled: settingsReady || tab !== "games" || !!gameId });
+  // the slate as this visit fetched it, or still fresh from before (not a copy saved on an earlier visit, which may
+  // lack a game added since): only that sends a game link or the owner's page elsewhere
+  const metaFresh = meta.isFetchedAfterMount || (!!meta.data && !meta.isStale);
   useDocumentTitle(!knownPath ? "Page not found" : gameId ? meta.data?.games.find((g) => g.game_id === gameId)?.label : TITLE[tab], "NBA");
   // Model check is the owner's: anyone else following a /nba/model link lands on the games (Admin keeps its own sign-in card)
   const owner = meta.data?.can_write;
-  useEffect(() => { if (tab === "check" && owner === false) goSection("games", { replace: true }); }, [tab, owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === "check" && metaFresh && owner === false) goSection("games", { replace: true }); }, [tab, owner, metaFresh]); // eslint-disable-line react-hooks/exhaustive-deps
   // odds over six hours old: the slip asks the bettor to check prices before handing legs to a book
   const { setStaleSince } = useBetSlip();
   const oddsAt = meta.data ? latestFetch(meta.data.odds) : undefined;
   const stale = !!oddsAt && oddsLevel(oddsAt) === "stale";
   useEffect(() => setStaleSince(stale ? oddsAt! : null), [stale, oddsAt, setStaleSince]);
-  const gameOpen = !!gameId && (!meta.data || meta.data.games.some((g) => g.game_id === gameId));
+  const gameOpen = !!gameId && (!metaFresh || !meta.data || meta.data.games.some((g) => g.game_id === gameId));
   useEffect(() => {
-    if (!gameId || !meta.data || meta.data.games.some((g) => g.game_id === gameId)) return;
+    if (!gameId || !metaFresh || !meta.data || meta.data.games.some((g) => g.game_id === gameId)) return;
     pushedGame.current = false;
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
     setGameId(null);
-  }, [gameId, meta.data]);
+  }, [gameId, meta.data, metaFresh]);
   const dates = useMemo(() => [...new Set((meta.data?.games ?? []).map((g) => g.gameday))].sort(), [meta.data]);
   const today = easternToday();
   const date = datePick === "all" || (datePick && dates.includes(datePick)) ? datePick : dates.includes(today) ? today : dates[0] ?? "all";
@@ -142,11 +149,12 @@ export default function NbaApp() {
       : tab === "promos" ? { ...dated, promo: promo === "early-win" ? null : promo } : {});
   }, [tab, gameId, filters, board.pickedBook, parlayGames, datePick, today, boardBook, promo]);
   const picks = useQuery({ queryKey: ["picks", debounced], queryFn: () => api.picks(debounced), enabled: tab === "picks", placeholderData: (p) => p });
-  const slatePicks = useQuery({ queryKey: ["slate-picks", debounced.book, debounced.marketWeight],
-    queryFn: () => api.picks({ ...debounced, kind: "all", side: "all", game: "all", q: "", minEv: 0, flagged: false, date: undefined }, 1000), enabled: onSlate });
-  const moneylines = useQuery({ queryKey: ["moneylines", debounced.book, debounced.marketWeight], queryFn: () => api.moneylines(debounced.book, debounced.marketWeight),
-    enabled: onSlate, placeholderData: (p) => p });
-  const injuries = useQuery({ queryKey: ["injuries"], queryFn: api.injuries, enabled: tab === "injuries" || onSlate, refetchInterval: 15 * 60_000 });
+  // the filters follow a new account book a render late (the effect above), so the board's book is worked out the same way
+  const book = filters.book === lastBoardBook.current ? boardBook : filters.book;
+  const slate = slateQueries<NbaMeta>("nba", book, debounced.marketWeight);
+  const slatePicks = useQuery({ ...slate.picks, enabled: onSlate && settingsReady });
+  const moneylines = useQuery({ ...slate.moneylines, enabled: onSlate && settingsReady, placeholderData: (p) => p });
+  const injuries = useQuery({ ...slate.injuries, enabled: tab === "injuries" || (onSlate && settingsReady), refetchInterval: 15 * 60_000 });
   const hot = useHotBoard(debounced, tab === "hot");
   const projections = useQuery({ queryKey: ["projections", debounced], queryFn: () => api.projections(debounced), enabled: tab === "projections", placeholderData: (p) => p });
 

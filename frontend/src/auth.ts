@@ -36,11 +36,17 @@ async function call(path: string, init: RequestInit = {}): Promise<AuthState> {
   return body as AuthState;
 }
 
+/** Set while this browser is signed in, so the next visit knows to wait for the account's settings (its sportsbook
+ *  prices the board) before the first board request, rather than fetch the board twice. Visitors never wait. */
+const SIGNED_IN = "signed-in";
+const signedInHere = () => { try { return localStorage.getItem(SIGNED_IN) === "1"; } catch { return false; } };
+
 /** Take a fresh answer from the server: the account's saved settings win over this browser's. */
 function apply(next: AuthState, { fromSignIn = false } = {}) {
   const was = auth?.user?.email;
   auth = next;
   const user = next.user;
+  try { if (user) localStorage.setItem(SIGNED_IN, "1"); else localStorage.removeItem(SIGNED_IN); } catch { /* storage blocked */ }
   if (user) {
     const saved = Object.fromEntries(Object.entries(user.prefs).filter(([, v]) => v != null)) as Partial<Prefs>;
     if (Object.keys(saved).length) setPrefs(saved, { save: false });
@@ -54,6 +60,13 @@ function apply(next: AuthState, { fromSignIn = false } = {}) {
 export function loadAuth(): Promise<void> {
   loading ??= call("me").then((s) => { apply(s); }, () => { auth = { user: null, google: false }; authListeners.forEach((l) => l()); });
   return loading;
+}
+
+/** Whether the account's settings are in (or there's no account here to wait for): queries priced at the visitor's
+ *  sportsbook wait for this, so a signed-in visit asks for its own book's board the first time. */
+export function useSettingsReady(): boolean {
+  const s = useAuth();
+  return s !== null || !signedInHere();
 }
 
 export function useAuth(): AuthState | null {

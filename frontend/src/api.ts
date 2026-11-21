@@ -1,4 +1,4 @@
-import { getLeague } from "./league";
+import { getLeague, type League } from "./league";
 import { mlLeague, parseMlId } from "./moneyline";
 
 /** NFL markets, then the NBA's points, rebounds, assists and 3-pointers made; "ml" is a team's moneyline (both leagues), which
@@ -356,3 +356,45 @@ export const api = {
 };
 
 
+
+// ---------- the games page in one request ----------
+/** The games page's four reads: the slate, its plays at any edge (the tiles' top prop and counts), moneylines, injuries. */
+export type SlatePart = "meta" | "picks" | "moneylines" | "injuries";
+export interface SlateParts<M> { meta: M; picks: Pick[]; moneylines: MoneylineGame[]; injuries: InjuryReport }
+interface Ask { part: SlatePart; book?: string; mw?: number | null; resolve: (v: unknown) => void; reject: (e: unknown) => void }
+const asks: Record<League, Ask[]> = { nfl: [], nba: [] };
+const leaguePrefix = (l: League) => (l === "nba" ? "nba/" : "");
+/** What the games page asks for its tiles: every over/under (touchdowns aside) at any edge, flagged ones left out. */
+const slatePicksParams = (book: string, mw: number | null) =>
+  ({ exclude_kind: "td", book: bookParam(book), min_ev: 0, market_weight: mw ?? undefined, include_flagged: false, limit: 1000 });
+
+function readOne(league: League, a: Ask): Promise<unknown> {
+  const p = leaguePrefix(league);
+  if (a.part === "picks") return get(`${p}picks`, slatePicksParams(a.book!, a.mw ?? null));
+  if (a.part === "moneylines") return get(`${p}moneylines`, { book: bookParam(a.book!), market_weight: a.mw ?? undefined });
+  return get(`${p}${a.part}`);
+}
+
+/** Every part asked for in the same moment (the games page mounting, or a prefetch) goes out as one /slate request: one
+ *  round trip instead of four, which is most of the wait on a phone. Parts priced at another book or market weight, or
+ *  one part on its own (a refetch), use their own endpoints. */
+function flush(league: League) {
+  const queue = asks[league].splice(0);
+  const priced = queue.find((a) => a.part === "picks" || a.part === "moneylines");
+  const together = queue.filter((a) => a.part === "meta" || a.part === "injuries" || (a.book === priced!.book && a.mw === priced!.mw));
+  const parts = new Set(together.map((a) => a.part));
+  const alone = parts.size > 1 ? queue.filter((a) => !together.includes(a)) : queue;
+  if (parts.size > 1) {
+    get<Partial<SlateParts<unknown>>>(`${leaguePrefix(league)}slate`, {
+      parts: [...parts].join(), ...(priced && { book: bookParam(priced.book!), market_weight: priced.mw ?? undefined }),
+    }).then((s) => together.forEach((a) => a.resolve(s[a.part])), (e) => together.forEach((a) => a.reject(e)));
+  }
+  alone.forEach((a) => readOne(league, a).then(a.resolve, a.reject));
+}
+
+/** One part of a league's games page (either league, whichever is on screen: prefetching reads the other one). */
+export function slatePart<K extends SlatePart, M = Meta | NbaMeta>(league: League, part: K, book?: string, mw?: number | null): Promise<SlateParts<M>[K]> {
+  return new Promise<unknown>((resolve, reject) => {
+    if (asks[league].push({ part, book, mw, resolve, reject }) === 1) setTimeout(() => flush(league), 0);
+  }).then((v) => (part === "meta" ? { ...(v as Meta), books: keepBooks((v as Meta).books) } : v) as SlateParts<M>[K]);
+}

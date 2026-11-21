@@ -549,3 +549,24 @@ def test_king_of_the_endzone_simulates_the_game_from_its_anytime_chances(client)
                 s.delete(p)
             s.commit()
         main._endzone_cache.clear()
+
+
+def test_slate_sends_the_games_page_in_one_request(client, monkeypatch):
+    monkeypatch.setitem(main.mlm.odds.TEAM_NAMES, "AAA", "Arizona Cardinals")
+    s = client.get("/api/slate", params={"book": "X"}).json()
+    meta = client.get("/api/meta").json()
+    meta.pop("job"), s["meta"].pop("job")
+    assert s["meta"] == meta
+    assert s["picks"] == client.get("/api/picks", params={"book": "X", "exclude_kind": "td", "min_ev": 0, "limit": 1000}).json()
+    assert s["moneylines"] == client.get("/api/moneylines", params={"book": "X"}).json()
+    assert s["injuries"] == client.get("/api/injuries").json()
+    only = client.get("/api/slate", params={"parts": "meta,injuries"}).json()
+    assert only["picks"] is None and only["moneylines"] is None and only["meta"]["games"] and only["injuries"] is not None
+
+
+def test_warming_the_caches_builds_the_boards_and_never_raises(client, monkeypatch):
+    main._pick_cache.clear()
+    main.warm_caches()
+    assert any(k[3] is None for k in main._pick_cache) and any(k[3] == "X" for k in main._pick_cache)   # every book, and each one
+    monkeypatch.setattr(main, "build_meta", lambda db: 1 / 0)
+    main.warm_caches()   # logged, not raised: a request builds it instead

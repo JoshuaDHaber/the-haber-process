@@ -1121,3 +1121,4 @@ button.danger-btn:focus-visible { outline: 2px solid var(--bad); outline-offset:
 /* the site's own focus ring on text buttons and primary buttons too, not the browser's default */
 .link:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; border-radius: 4px; }
 button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+.league-switch { display: contents; }

@@ -31,10 +31,17 @@ const ESPN_SLUG: Record<string, string> = { LA: "lar", WAS: "wsh" };
 /** Every team in a league, alphabetical by abbreviation (the favorite-team picker). */
 export const teamsOf = (league: League) => Object.keys(league === "nba" ? NBA_TEAMS : TEAMS).sort();
 
-export const teamLogo = (team: string, league: League = getLeague()) => {
-  if (league === "nba") return team in NBA_TEAMS ? `https://a.espncdn.com/i/teamlogos/nba/500/${team.toLowerCase()}.png` : null;
-  return team in TEAMS ? `https://a.espncdn.com/i/teamlogos/nfl/500/${ESPN_SLUG[team] ?? team.toLowerCase()}.png` : null;
+/** A team's logo from ESPN, scaled down by ESPN's image service to `px` (pass about twice the shown size, for sharp
+ *  screens): the original files are 500 px, ~40 KB each, against ~4 KB at 80 px. Sizes snap to a few so every logo of
+ *  a size shares one cached file. */
+export const teamLogo = (team: string, league: League = getLeague(), px = 80) => {
+  const file = league === "nba" ? (team in NBA_TEAMS ? `nba/500/${team.toLowerCase()}` : null)
+    : team in TEAMS ? `nfl/500/${ESPN_SLUG[team] ?? team.toLowerCase()}` : null;
+  if (!file) return null;
+  const w = LOGO_SIZES.find((s) => s >= px);
+  return w ? `https://a.espncdn.com/combiner/i?img=/i/teamlogos/${file}.png&w=${w}&h=${w}` : `https://a.espncdn.com/i/teamlogos/${file}.png`;
 };
+const LOGO_SIZES = [40, 80, 160];
 
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 /** Relative luminance (0 black .. 1 white). */

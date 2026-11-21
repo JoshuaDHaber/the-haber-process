@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { sharedClient } from "../queryClients";
 import { api, type Meta } from "../api";
 import { decimals, marketLabel, unit, signed, timeAgo, weatherText, wxEffect } from "../format";
 import type { Kind } from "../api";
@@ -40,7 +41,7 @@ function RedistributionCard({ r }: { r: NonNullable<Meta["redistribution"]> }) {
 
 /** How same-game parlays are priced, and how that did on backtest weeks the correlations weren't fitted on. */
 function CorrelationCard() {
-  const { data } = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, staleTime: 10 * 60_000 });
+  const { data } = useQuery({ queryKey: ["correlations"], queryFn: api.correlations, staleTime: 10 * 60_000 }, sharedClient);
   if (!data || !Object.keys(data.pairs).length) return null;
   const pos = data.check.positive, neg = data.check.negative, tri = data.check.triples;
   const p0 = (x?: number) => (x == null ? "–" : `${(x * 100).toFixed(1)}%`);

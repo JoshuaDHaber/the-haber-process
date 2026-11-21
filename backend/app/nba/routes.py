@@ -21,7 +21,7 @@ from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
 from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
-                       LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
+                       LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, NbaSlate, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
 from . import espn, grading, king, lead, model
 from . import odds as nba_odds
 
@@ -357,6 +357,19 @@ def _rosters(_slot: int) -> pd.DataFrame:
         return pd.DataFrame(columns=["player_id", "name", "pos", "team", "headshot"])
 
 
+@router.get("/slate", response_model=NbaSlate)
+def slate(request: Request, book: Optional[str] = None, market_weight: Optional[float] = Query(None, ge=0, le=1),
+          parts: str = "meta,picks,moneylines,injuries", db: Session = Depends(get_db)):
+    """The games page in one request instead of four (as /api/slate): meta, its plays at any edge, moneylines, injuries."""
+    want = set(parts.split(","))
+    return NbaSlate(
+        meta=meta(request, db) if "meta" in want else None,
+        picks=picks(kind=None, side=None, game_id=None, gameday=None, q=None, book=book, min_ev=0, market_weight=market_weight,
+                    include_flagged=False, limit=1000, db=db) if "picks" in want else None,
+        moneylines=moneylines(book=book, market_weight=market_weight, lead_by=lead.THRESHOLD, db=db) if "moneylines" in want else None,
+        injuries=injuries(db) if "injuries" in want else None)
+
+
 @router.get("/player-search", response_model=list[PlayerHit])
 def player_search(q: str = Query("", max_length=60), limit: int = Query(12, ge=1, le=50), db: Session = Depends(get_db)):
     """Rostered players whose name matches q: the slate's projected players first, then everyone else (not playing on the slate)."""
@@ -449,6 +462,22 @@ def player_history(player_id: str, kind: NbaKind, db: Session = Depends(get_db))
     run = latest_run(db)
     p = _proj(db, run, player_id, kind)
     return market_fit.line_history(db, p.game_id, p.name, kind, p.mu, p.sd, _dists(run).get(kind), "nba")
+
+
+def warm_caches() -> None:
+    """Build what the games page asks for before a visitor does (main.warm_caches runs it after every job)."""
+    try:
+        with SessionLocal() as db:
+            run = latest_run(db)
+            if not run:
+                return
+            shown = books.shown((b for (b,) in db.execute(select(NbaOddsLine.book).distinct()).all()), books.hide_offshore(db))
+            for book in [None, *shown]:
+                all_picks(db, run, None, book)
+            build_moneylines(db, run)
+            injuries(db)
+    except Exception as e:   # a request builds it instead
+        print(f"Couldn't warm the NBA caches: {e}")
 
 
 def clear_caches():

@@ -483,3 +483,19 @@ def test_nba_ladder_prices_from_the_calibrated_projection(nba_client):
             s.query(Setting).filter_by(key="market_fit_nba").delete()
             s.commit()
         market_fit.clear_cache()
+
+
+def test_nba_slate_sends_the_games_page_in_one_request(nba_client):
+    s = nba_client.get("/api/nba/slate").json()
+    assert s["meta"] == nba_client.get("/api/nba/meta").json()
+    assert s["picks"] == nba_client.get("/api/nba/picks", params={"min_ev": 0, "limit": 1000}).json()
+    assert s["moneylines"] == nba_client.get("/api/nba/moneylines").json()
+    assert s["injuries"] == nba_client.get("/api/nba/injuries").json() and s["injuries"]["teams"]
+    assert nba_client.get("/api/nba/slate", params={"parts": "picks"}).json()["meta"] is None
+
+
+def test_nba_warming_builds_the_board(nba_client):
+    nba_routes._pick_cache.clear()
+    nba_routes.warm_caches()
+    assert any(k[3] == "FanDuel" for k in nba_routes._pick_cache)
+
