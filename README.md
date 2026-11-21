@@ -308,6 +308,32 @@ the sign-in code is printed in the server log.
   `--to "sqlite:///$PWD/data/app.db"` (back it up first with `sqlite3 data/app.db ".backup <file>"`). The unit tests
   run on in-memory SQLite by default.
 
+### Test accounts
+
+`app/dev_users.py` makes four signed-in accounts (all `@haber.test`) in states worth testing, built from props on the
+current boards. Re-run `seed` after each refresh so their bets and slip point at games on the new boards.
+
+```bash
+cd backend && DATABASE_URL=postgresql://localhost/haber NFLPROPS_NO_DOTENV=1 .venv/bin/python -m app.dev_users seed
+```
+
+| Account   | State                                                                                                      |
+|-----------|------------------------------------------------------------------------------------------------------------|
+| `new`     | Signed in, 21+ not confirmed: the age gate. Nothing can be saved.                                          |
+| `member`  | 21+, nothing saved: every empty state (My bets, favorites, the slip).                                      |
+| `regular` | 21+, with prefs, favorites, a saved slip, and 8 bets: open and settled (won, lost, push), NFL, NBA and custom, a same-game parlay, a bonus bet, a profit boost, a no-sweat bet. |
+| `admin`   | 21+, the admin page, when the server has `ADMIN_EMAILS=admin@haber.test`.                                  |
+
+**Sign one in** without the emailed code: `python -m app.dev_users cookie regular` (same env as above) prints a
+session token and a line to paste in the browser console. The line signs out any current session, sets the cookie, and
+reloads the page. With curl, use `-b sid=<token>`.
+
+**See the site as a non-admin.** Every request from this machine counts as admin, so a laptop normally shows admin
+controls to everyone. Start the server with `LOCAL_IS_ADMIN=0` to turn that off. Add `ADMIN_EMAILS=admin@haber.test`
+to keep the admin account working.
+
+The script refuses any database that isn't on this machine, including the prod tunnel on port 54329.
+
 ## Using it from your phone anywhere (Tailscale, free)
 
 [Tailscale](https://tailscale.com) is a free private network between your own devices, so your phone can reach the app on your Mac from any network without hosting anything.
