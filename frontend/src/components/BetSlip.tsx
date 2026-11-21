@@ -42,7 +42,7 @@ export default function BetSlip() {
   const [promos, setPromos] = useState<Record<string, Promo>>({});
   const promoFor = (book: string) => promos[book] ?? NO_PROMO;
   // what "Place bet" records for that promo (a boost or refund still being typed counts once it's complete)
-  const bodyFor = (book: string, stake: number): PromoBody => (promoReady(promoFor(book), stake) ? promoBody(promoFor(book), stake) : { bonus: false, boost: 0, no_sweat: 0 });
+  const bodyFor = (book: string, stake: number): PromoBody => (promoReady(promoFor(book), stake) ? promoBody(promoFor(book), stake) : { bonus: false, boost: 0, no_sweat: 0, early_win: 0 });
   const sameBody = (a: PromoBody, b: PromoBody) => a.bonus === b.bonus && (a.boost ?? 0) === (b.boost ?? 0) && (a.no_sweat ?? 0) === (b.no_sweat ?? 0);
   // what "Place bet" recorded on My bets, per book: `key` is the legs it was for, so clicking Place again (or after tweaking
   // the stake) doesn't record it twice, while a different set of legs is a new bet
@@ -343,7 +343,8 @@ export default function BetSlip() {
                         ))}
                       </span>
                     </div>
-                    <PromoFields promo={promoFor(book)} onChange={(pr) => setPromos({ ...promos, [book]: pr })} stake={stake} book={book} compact />
+                    <PromoFields promo={promoFor(book)} onChange={(pr) => setPromos({ ...promos, [book]: pr })} stake={stake} book={book} compact
+                      moneyline={ls.length === 1 && ls[0].kind === "ml" ? legLeague(ls[0]) : null} />
                     {clashBooks.has(book) ? <span className="err">Not a valid parlay yet</span> : !stake ? (
                       <span className="mut">Enter a stake to see {ls.length > 1 ? `the ${ls.length}-leg payout` : "what it pays"}</span>
                     ) : (() => {

@@ -3,7 +3,7 @@ import { IconPhoto, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
-import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
+import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
   type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
 import { isYesNo, KIND_LABEL, namesItself, americanOdds, playLabel } from "../format";
 import { toAmerican, toDecimal, toWin } from "../slip";
@@ -96,6 +96,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const allLegs: ManualLeg[] = canAddLeg ? [...legs, { player: player!, kind: kind as Kind, side, line: lineN, odds: legOddsN }] : legs;
   const parlayN = allLegs.length > 1 ? (parseOdds(parlayOdds) ?? legsPrice(allLegs)) : null;
   const propOdds = allLegs.length === 1 ? allLegs[0].odds : parlayN;
+  // a single moneyline can carry an early-win token (in its league's default lead)
+  const solo = mode === "prop" && allLegs.length === 1 && !allLegs[0].custom ? allLegs[0] : null;
+  const moneyline = solo && !solo.custom && solo.kind === "ml" ? legLeague({ kind: "ml", gameId: solo.player.game_id }) : null;
   const otherOdds = parseOdds(odds);
   const startsAt = new Date(`${date}T${time || "00:00"}`);
   const tooOld = startsAt.getTime() < Date.now() - LATE_DAYS * 86_400_000;
@@ -292,7 +295,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
           </label>
           <label className="auth-label">Stake<input className="auth-input" inputMode="decimal" value={stake} placeholder="$0" onChange={(e) => setStake(e.target.value)} /></label>
         </div>
-        <PromoFields promo={promo} onChange={setPromo} stake={stakeOk ? stakeN : 0} book={book.trim() || undefined} />
+        <PromoFields promo={promo} onChange={setPromo} stake={stakeOk ? stakeN : 0} book={book.trim() || undefined} moneyline={moneyline} />
         <label className="auth-label" htmlFor="add-tags">Tags <span className="mut">(optional)</span></label>
         <TagInput id="add-tags" tags={tags} onChange={setTags} suggestions={known.data?.tags} />
         {late && !tooOld && <p className="warn add-late">{mode === "prop" ? "This game has started" : "This has started"}, so it's added

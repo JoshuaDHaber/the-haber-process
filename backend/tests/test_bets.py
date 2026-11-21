@@ -399,6 +399,61 @@ def test_moneylines_are_tracked_with_props_and_graded_from_the_final_score(sent)
         assert (s.get(Bet, nba).status, s.get(Bet, nba).legs[0].actual) == ("won", 2.0)
 
 
+def test_an_early_win_moneyline_wins_once_its_team_led_by_enough(sent):
+    """FanDuel's early-win token: the moneyline pays as a win once the team leads by the token's points, even if it loses."""
+    with member(sent, "earlywin@example.com", "198.51.100.43") as c:
+        ml = dict(game_id=NBA_GAME, player_id="NYK", kind="ml", side="Over", line=0, odds=180)
+        b = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "single", "stake": 10, "early_win": 10, "legs": [ml]}).json()
+        assert b["early_win"] == 10 and b["to_pay"] == 28.0   # it pays the moneyline's price, early or not
+        prop = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "single", "stake": 10, "early_win": 10, "legs": [leg()]})
+        assert prop.status_code == 422 and "single moneyline" in prop.json()["detail"]
+        two = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "single", "stake": 10, "early_win": 10, "boost": 25, "legs": [ml]})
+        assert two.status_code == 422 and "one promo" in two.json()["detail"]
+        assert c.post("/api/me/bets", json={"book": "FanDuel", "kind": "single", "stake": 10, "early_win": 99, "legs": [ml]}).status_code == 422
+        assert c.patch(f"/api/me/bets/{b['id']}", json={"early_win": 0}).json()["early_win"] is None
+
+    today = espn.today_et()
+    day = (today - timedelta(days=1)).isoformat()
+    game = "2098_20981102_BOS_NYK"
+    def bet(team, early, odds=180):
+        bid = tracked([dict(game_id=game, gameday=day, player_id=team, kind="ml", side="Over", line=0.0, odds=odds)], kind="single", odds=odds)
+        with SessionLocal() as s:
+            s.get(Bet, bid).early_win = early
+            s.commit()
+        return bid
+    led_and_lost = bet("BOS", 10)    # away team: up 12 at one point, lost by 2
+    short = bet("BOS", 15)           # needed 15, led by 12: a plain loss
+    won = bet("NYK", 10, -220)       # won outright: no lead needed
+    logs = pd.DataFrame([dict(player_id="78", event_id="e2", season=2099, date=day, team="BOS", opp="NYK", home=False, home_score=101,
+                              away_score=99, min=34, pts=20, reb=8, ast=6)])
+    asked = []
+    lead_of = lambda event: (asked.append(event), (6.0, 12.0))[1]   # (home's largest lead, away's)
+    with SessionLocal() as s:
+        bets.grade_nba(s, logs, today, fetch=lambda *a, **k: pytest.fail("no players to fetch"), lead_of=lead_of)
+        early, plain, outright = s.get(Bet, led_and_lost), s.get(Bet, short), s.get(Bet, won)
+        assert (early.status, early.payout, early.legs[0].actual, early.legs[0].lead) == ("won", 28.0, -2.0, 12.0)
+        assert (plain.status, plain.legs[0].lead) == ("lost", 12.0)
+        assert (outright.status, outright.legs[0].lead) == ("won", None)
+    assert asked == ["e2", "e2"]   # only the bets that didn't win outright ask for the lead
+
+    # ESPN without the lead yet: it waits rather than calling it a loss
+    waiting = bet("BOS", 10)
+    with SessionLocal() as s:
+        bets.grade_nba(s, logs, today, fetch=lambda *a, **k: pytest.fail("no players to fetch"), lead_of=lambda e: (None, None))
+        assert s.get(Bet, waiting).status == "open"
+
+    # NFL: the play-by-play's largest lead
+    g = "2098_05_HOU_JAX"
+    nfl = tracked([dict(game_id=g, gameday="2098-10-04", player_id="HOU", kind="ml", side="Over", line=0.0, odds=150)], kind="single", odds=150)
+    with SessionLocal() as s:
+        s.get(Bet, nfl).early_win = 17
+        s.commit()
+        stats = pd.DataFrame([dict(player_id="00-Z", season=2098, week=1, team="KC", rushing_yards=1, receiving_yards=0)])
+        bets.grade_nfl(s, stats, pd.DataFrame([dict(game_id=g, home_score=24, away_score=20)]),
+                       leads=pd.DataFrame([dict(game_id=g, home_lead=3.0, away_lead=17.0)]))
+        assert (s.get(Bet, nfl).status, s.get(Bet, nfl).legs[0].lead) == ("won", 17.0)   # HOU is away: up 17, lost by 4
+
+
 def test_tags_and_filters(sent):
     with member(sent, "organizer@example.com", "198.51.100.8") as c:
         post = lambda book, legs, **kw: c.post("/api/me/bets", json={"book": book, "kind": "single", "stake": 10, "legs": legs, **kw}).json()

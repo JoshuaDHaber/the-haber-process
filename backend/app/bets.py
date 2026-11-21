@@ -26,6 +26,7 @@ MAX_STAKE = 100_000
 # a bet the bettor forgot to record can still be added this many days after its first game starts; it's marked late
 LATE_DAYS = 7
 MAX_TAGS, TAG_LEN = 6, 24
+MAX_EARLY_WIN = 40   # an early-win token's lead, in points: FanDuel's are 10 (NBA) and 17 (NFL)
 MAX_BOOST = 500   # a profit boost, in percent; books' run 10% to 100%, now and then more
 # a parlay leg whose own price the book didn't show (most only show the parlay's): bet_legs.odds can't be NULL in
 # databases created before this, and no American price is 0, so 0 means "not known"
@@ -98,9 +99,9 @@ def refund(bet: Bet) -> float:
     return round(min(bet.no_sweat, bet.stake), 2) if bet.no_sweat and bet.status == "lost" else 0.0
 
 
-def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: Optional[float]) -> None:
-    """Put the bettor's promo on the bet (None leaves that one as it is; a 0 boost or refund takes it off). One per bet:
-    a bonus bet, a profit boost or a no-sweat refund."""
+def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: Optional[float], early_win: Optional[int] = None) -> None:
+    """Put the bettor's promo on the bet (None leaves that one as it is; a 0 boost, refund or lead takes it off). One per
+    bet: a bonus bet, a profit boost, a no-sweat refund or an early-win token (on a single moneyline: check_early_win)."""
     if bonus is not None:
         bet.bonus = bonus
     if boost is not None:
@@ -111,8 +112,25 @@ def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: O
         if no_sweat < 0:
             raise HTTPException(422, "Enter the no-sweat refund in dollars")
         bet.no_sweat = round(min(no_sweat, bet.stake), 2) or None   # a book refunds at most the stake
-    if sum([bool(bet.bonus), bool(bet.boost), bool(bet.no_sweat)]) > 1:
-        raise HTTPException(422, "A bet takes one promo: a bonus bet, a profit boost or a no-sweat refund")
+    if early_win is not None:
+        if early_win and not 1 <= early_win <= MAX_EARLY_WIN:
+            raise HTTPException(422, f"An early win's lead is 1 to {MAX_EARLY_WIN} points")
+        bet.early_win = early_win or None
+    if sum([bool(bet.bonus), bool(bet.boost), bool(bet.no_sweat), bool(bet.early_win)]) > 1:
+        raise HTTPException(422, "A bet takes one promo: a bonus bet, a profit boost, a no-sweat refund or an early win")
+
+
+def check_early_win(bet: Bet) -> None:
+    """An early-win token pays a moneyline once its team leads by enough: it only goes on a single moneyline."""
+    if bet.early_win and not (bet.kind == "single" and len(bet.legs) == 1 and bet.legs[0].kind == ML):
+        raise HTTPException(422, "An early win only goes on a single moneyline bet")
+
+
+def _early(leg: BetLeg, result: Optional[str], lead: Optional[float]) -> Optional[str]:
+    """A moneyline's result with its bet's early-win token: a win once the team led by the token's points, whatever the
+    final score. The lead is kept on the leg so My bets can say it was won early."""
+    leg.lead = lead
+    return "win" if lead is not None and leg.bet.early_win and lead >= leg.bet.early_win else result
 
 
 def require_member(user: User = Depends(auth.require_user)) -> User:
@@ -157,9 +175,11 @@ def _settle_touched(session, legs: list, now: datetime) -> None:
         settle(bet, now)
 
 
-def grade_nfl(session, stats: pd.DataFrame, sched: pd.DataFrame, now: Optional[datetime] = None) -> int:
+def grade_nfl(session, stats: pd.DataFrame, sched: pd.DataFrame, now: Optional[datetime] = None, leads: Optional[pd.DataFrame] = None) -> int:
     """Grade open NFL legs whose game is final and whose teams' stats are in (as grading.grade does the board): a player
-    with no stats row didn't play, so the leg is void. Settles the bets they belong to. Returns how many legs were graded."""
+    with no stats row didn't play, so the leg is void. A moneyline with an early-win token that didn't win outright waits
+    for its team's largest lead (play-by-play: leads, else data.load_leads) for up to a week. Settles the bets they belong
+    to. Returns how many legs were graded."""
     now = now or datetime.utcnow()
     todo = [leg for leg in session.scalars(select(BetLeg).where(BetLeg.result.is_(None))) if league_of(leg.kind, leg.game_id) == "nfl"]
     if not todo or stats.empty:
@@ -175,12 +195,22 @@ def grade_nfl(session, stats: pd.DataFrame, sched: pd.DataFrame, now: Optional[d
             continue
         season, week, away, home = leg.game_id.split("_", 3)
         season, week = int(season), int(week)
-        if leg.kind == ML:   # the final score is all a moneyline needs (a tie pushes)
+        if leg.kind == ML:   # the final score is all a moneyline needs (a tie pushes), unless it has an early-win token
             g = scores.get(leg.game_id)
             if g is None:
                 continue
-            leg.actual = float(g.home_score - g.away_score) * (1 if leg.player_id == home else -1)
-            leg.result, leg.graded_at = grading.outcome(leg.side, leg.line, leg.actual), now
+            actual = float(g.home_score - g.away_score) * (1 if leg.player_id == home else -1)
+            result = grading.outcome(leg.side, leg.line, actual)
+            if leg.bet.early_win and result != "win":
+                if leads is None:
+                    leads = _nfl_leads(season)
+                row = leads[leads.game_id == leg.game_id] if not leads.empty else leads
+                lead = None if row.empty else float(row.iloc[0]["home_lead" if leg.player_id == home else "away_lead"])
+                if lead is None and now - leg.kickoff < timedelta(days=7):
+                    continue   # play-by-play not out yet: the lead decides it
+                result = _early(leg, result, lead)
+            leg.actual = actual
+            leg.result, leg.graded_at = result, now
             done.append(leg)
             continue
         if not {(season, week, away), (season, week, home)} <= have:
@@ -194,10 +224,22 @@ def grade_nfl(session, stats: pd.DataFrame, sched: pd.DataFrame, now: Optional[d
     return len(done)
 
 
-def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable] = None, now: Optional[datetime] = None) -> int:
+def _nfl_leads(season: int) -> pd.DataFrame:
+    """Each game's largest lead for both sides this season (data.load_leads, cached by the model run); empty if it fails."""
+    from .engine import data
+    try:
+        return data.load_leads([season], keep_raw=[season])
+    except Exception:   # noqa: BLE001  (a download problem waits for the next run)
+        return pd.DataFrame(columns=["game_id", "home_lead", "away_lead"])
+
+
+def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable] = None, now: Optional[datetime] = None,
+              lead_of: Optional[Callable] = None) -> int:
     """Grade open NBA legs from games before today (Eastern) against the ESPN game logs, with nba/grading.py's rules: a
     player missing from a finished box score is void once he has played again or two days have passed, and a box score
-    that never appears (a postponement) voids the leg after a week. Settles their bets; returns how many legs were graded."""
+    that never appears (a postponement) voids the leg after a week. A moneyline with an early-win token that didn't win
+    outright is settled by its team's largest lead (ESPN: lead_of(event id) -> (home, away)). Settles their bets; returns
+    how many legs were graded."""
     from .nba import espn, model
     from .nba.grading import STALE_AFTER_DAYS, VOID_AFTER_DAYS
     fetch = fetch or espn.gamelogs
@@ -224,8 +266,19 @@ def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable
             g = scores.get((leg.gameday, home, away))
             if g is None and age < VOID_AFTER_DAYS:
                 continue   # no final score yet; a game that never shows up (postponed) voids after a week
-            leg.actual = None if g is None else float(g.home_score - g.away_score) * (1 if leg.player_id == home else -1)
-            leg.result, leg.graded_at = grading.outcome(leg.side, leg.line, leg.actual), now
+            actual = None if g is None else float(g.home_score - g.away_score) * (1 if leg.player_id == home else -1)
+            result = grading.outcome(leg.side, leg.line, actual)
+            if leg.bet.early_win and actual is not None and result != "win":
+                if lead_of is None:
+                    from .nba import lead as nba_lead
+                    lead_of = nba_lead._leads
+                h, a = lead_of(str(g.event_id))
+                lead = h if leg.player_id == home else a
+                if lead is None and age < VOID_AFTER_DAYS:
+                    continue   # ESPN hasn't the lead yet: it decides an early win
+                result = _early(leg, result, lead)
+            leg.actual = actual
+            leg.result, leg.graded_at = result, now
             done.append(leg)
             continue
         if not {(leg.gameday, away), (leg.gameday, home)} <= have:
@@ -316,13 +369,13 @@ def _out(bet: Bet, now: datetime) -> BetOut:
         id=bet.id, league=bet.league, book=bet.book, kind=bet.kind, stake=bet.stake, odds=bet.odds, status=bet.status,
         payout=bet.payout, profit=round(bet.payout - cost(bet), 2) if settled and bet.payout is not None else None,
         to_pay=returned(bet, "won"), settled_by=bet.settled_by, notes=bet.notes, tags=bet.tags or [],
-        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, no_sweat=bet.no_sweat, refund=refund(bet),
+        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, no_sweat=bet.no_sweat, refund=refund(bet), early_win=bet.early_win,
         placed_at=bet.placed_at.isoformat(), settled_at=bet.settled_at.isoformat() if bet.settled_at else None,
         started=min(leg.kickoff for leg in bet.legs) <= now, ev_close=bet_ev_close(bet), late=bool(bet.late),
         legs=[BetLegOut(id=leg.id, game_id=leg.game_id, gameday=leg.gameday, kickoff=leg.kickoff.isoformat(), player_id=leg.player_id,
                         name=leg.name, team=leg.team, opp=leg.opp, kind=leg.kind, side=leg.side, line=leg.line, odds=leg.odds,
                         alt=leg.alt, prob=leg.prob, ev=leg.ev, actual=leg.actual, result=leg.result,
-                        close_p=leg.close_p, ev_close=leg_ev_close(leg)) for leg in bet.legs])
+                        close_p=leg.close_p, ev_close=leg_ev_close(leg), lead=leg.lead) for leg in bet.legs])
 
 
 def summarize(bets: list) -> BetSummary:
@@ -374,7 +427,7 @@ def _view(db: Session, user: User, league, book, tag, months, now: datetime) -> 
 
 
 CSV_COLUMNS = ["bet_id", "placed_at", "league", "sportsbook", "type", "stake", "odds", "status", "payout", "profit", "settled_at",
-               "tags", "ev_at_close", "bonus_bet", "profit_boost_pct", "no_sweat_refund", "added_late",
+               "tags", "ev_at_close", "bonus_bet", "profit_boost_pct", "no_sweat_refund", "added_late", "early_win_lead",
                "leg_player", "leg_team", "leg_opponent", "leg_game_date", "leg_market", "leg_side", "leg_line",
                "leg_odds", "leg_alt_line", "leg_result", "leg_actual", "leg_close_chance"]
 
@@ -396,7 +449,7 @@ def export_csv(league: Optional[str] = Query(None, pattern="^(nfl|nba|oth)$"), b
                 b.payout if settled else "", round(b.payout - cost(b), 2) if settled else "",
                 b.settled_at.isoformat(timespec="seconds") if b.settled_at else "", "; ".join(b.tags or []),
                 "" if (e := bet_ev_close(b)) is None else e, "yes" if b.bonus else "", b.boost or "",
-                refund(b) or "", "yes" if b.late else ""]
+                refund(b) or "", "yes" if b.late else "", b.early_win or ""]
         for leg in b.legs:
             w.writerow([*head, leg.name, leg.team, leg.opp, leg.gameday, leg.kind, leg.side, leg.line, leg.odds or "", "yes" if leg.alt else "",
                         leg.result or "", "" if leg.actual is None else leg.actual, "" if leg.close_p is None else round(leg.close_p, 4)])
@@ -521,7 +574,8 @@ def _track_custom(body: BetIn, user: User, db: Session, now: datetime) -> BetOut
     bet = Bet(user_id=user.id, league=body.league or "oth", book=body.book.strip()[:40] or "Other", kind=CUSTOM, stake=round(body.stake, 2),
               odds=body.odds, status="open", notes=(body.notes or "").strip()[:500] or None, tags=clean_tags(body.tags),
               description=text, late=starts <= now, placed_at=now)
-    set_promo(bet, body.bonus, body.boost, body.no_sweat)
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
+    check_early_win(bet)
     bet.legs.append(BetLeg(game_id=CUSTOM, gameday=starts.date().isoformat(), kickoff=starts, player_id="", name=text[:80], team="",
                            opp="", kind=CUSTOM, side="", line=0.0, odds=body.odds))
     db.add(bet)
@@ -564,7 +618,7 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
         raise HTTPException(422, "Describe each leg you'll mark by hand in a few words")
     bet = Bet(user_id=user.id, league=league, book=body.book.strip()[:40], kind=body.kind, stake=round(body.stake, 2), odds=odds,
               status="open", notes=(body.notes or "").strip()[:500] or None, tags=clean_tags(body.tags), placed_at=now)
-    set_promo(bet, body.bonus, body.boost, body.no_sweat)
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
     games = {}
     for leg in graded:
         g = _game(db, league, leg.game_id, leg.player_id, leg.kind)
@@ -584,6 +638,7 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
         text = " ".join(leg.description.split())
         bet.legs.append(BetLeg(game_id=CUSTOM, gameday=first["gameday"], kickoff=first["kickoff"], player_id="", name=text[:80], team="",
                                opp="", kind=CUSTOM, side="", line=0.0, odds=NO_ODDS if leg.odds is None else leg.odds))
+    check_early_win(bet)
     db.add(bet)
     db.commit()
     return _out(bet, now)
@@ -591,7 +646,8 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
 
 @router.patch("/bets/{bet_id}", response_model=BetOut, dependencies=[Depends(auth.same_origin)])
 def edit(bet_id: int, body: BetPatch, user: User = Depends(require_member), db: Session = Depends(auth.get_db)):
-    """Fix the stake, odds, notes or promo (a bonus bet, a profit boost, a no-sweat refund), or settle it by hand (status "open" hands it back to grading)."""
+    """Fix the stake, odds, notes or promo (a bonus bet, a profit boost, a no-sweat refund, an early win), or settle it by
+    hand (status "open" hands it back to grading)."""
     bet = _mine(db, user, bet_id)
     now = datetime.utcnow()
     if body.stake is not None:
@@ -608,7 +664,12 @@ def edit(bet_id: int, body: BetPatch, user: User = Depends(require_member), db: 
         bet.notes = body.notes.strip()[:500] or None
     if body.tags is not None:
         bet.tags = clean_tags(body.tags)
-    set_promo(bet, body.bonus, body.boost, body.no_sweat)
+    had_early = bet.early_win
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
+    check_early_win(bet)
+    if bet.early_win != had_early and bet.legs[0].result is not None:
+        # the token was added, changed or taken off after grading: the next run grades the moneyline again with it
+        bet.legs[0].result, bet.legs[0].lead, bet.legs[0].graded_at = None, None, None
     if bet.no_sweat and bet.no_sweat > bet.stake:
         bet.no_sweat = bet.stake   # the stake came down below the refund: a book refunds at most the stake
     promo = body.bonus is not None or body.boost is not None
