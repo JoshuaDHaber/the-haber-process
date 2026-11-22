@@ -171,7 +171,7 @@ def run_projections(exclude=(), keep_dnp=False, season=None, week=None, log: Log
 
     By default the previous run's calibration is reused when it is recent (seconds instead of minutes on a small
     server); full=True, or no usable calibration, refits it with the walk-forward backtest."""
-    sched = data.load_schedule()
+    sched = book_kickoffs(data.load_schedule(), log)
     played = sched[sched.home_score.notna()]
     cur = sched[sched.home_score.isna()].sort_values(["season", "week"]).iloc[0]
     season, week = season or int(cur.season), week or int(cur.week)
@@ -416,9 +416,45 @@ def store_lines(df: pd.DataFrame, session, table=OddsLine) -> int:
     return len(df)
 
 
+def book_kickoffs(sched: pd.DataFrame, log: Log = print, events: Optional[list] = None) -> pd.DataFrame:
+    """The schedule with each unplayed game's date and time taken from the Odds API's event list (a free call).
+
+    nflverse can lag a kickoff change by days (a game moved from 4:25 to 1:00, a flex), and the board, bets and odds
+    sync all go by kickoff. Games keep nflverse's time when no key is set, the call fails, or no event matches."""
+    if events is None:
+        keys = config.odds_keys("nfl")
+        if not keys:
+            return sched
+        try:
+            events = odds.list_events(keys[0][1])
+        except Exception as e:
+            log(f"Couldn't check kickoff times against the sportsbooks: {e}")
+            return sched
+    starts: dict = {}
+    for e in events:
+        if e.get("away") and e.get("home") and e.get("commence"):
+            ko = datetime.fromisoformat(e["commence"].replace("Z", "+00:00")).astimezone(ET)
+            starts.setdefault((e["away"], e["home"]), []).append(ko)
+    sched = sched.copy()
+    for i, r in sched[sched.home_score.isna()].iterrows():
+        try:
+            day = datetime.fromisoformat(str(r.gameday)).date()
+        except ValueError:
+            continue
+        near = [k for k in starts.get((r.away_team, r.home_team), []) if abs((k.date() - day).days) <= 6]
+        if not near:
+            continue
+        ko = min(near, key=lambda k: abs((k.date() - day).days))
+        d, t = ko.strftime("%Y-%m-%d"), ko.strftime("%H:%M")
+        if (str(r.gameday), str(r.gametime)) != (d, t):
+            log(f"Kickoff for {r.game_id} moved: {r.gameday} {r.gametime} -> {d} {t} ET (the sportsbooks' time)")
+            sched.at[i, "gameday"], sched.at[i, "gametime"] = d, t
+    return sched
+
+
 def upcoming_games() -> pd.DataFrame:
     """Unplayed games of the next week to be played (the week the projections are for)."""
-    sched = data.load_schedule()
+    sched = book_kickoffs(data.load_schedule())
     todo = sched[sched.home_score.isna()]
     first = todo.sort_values(["season", "week"]).iloc[0]
     return todo[(todo.season == first.season) & (todo.week == first.week)]
