@@ -747,6 +747,7 @@ class BetPatch(BaseModel):
     boost: Optional[int] = None      # 0 takes the boost off
     no_sweat: Optional[float] = None # 0 takes the no-sweat refund off
     early_win: Optional[int] = None  # 0 takes the early-win token off
+    payout: Optional[float] = None   # with status "won": what the book actually paid back (default: worked out from the odds)
     # settle by hand (the book settled differently), or "open" to hand it back to grading
     status: Optional[Literal["open", "won", "lost", "push", "void"]] = None
 
@@ -795,6 +796,7 @@ class BetOut(BaseModel):
     no_sweat: Optional[float] = None # a no-sweat bet's refund if it loses, as a bonus bet (at most the stake)
     refund: float = 0.0              # what a lost no-sweat bet earned back in bonus bets
     early_win: Optional[int] = None  # an early-win token: the lead that pays the moneyline as a win
+    needs_payout: bool = False       # every leg is in, but a leg that dropped out has no known price: the bettor enters the payout
     placed_at: str
     settled_at: Optional[str] = None
     started: bool                    # its first game has kicked off

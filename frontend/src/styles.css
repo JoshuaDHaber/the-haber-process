@@ -1095,6 +1095,15 @@ header .sub a { color: var(--mut); font-weight: 500; text-decoration: none; } he
 .add-bet .seg { margin-bottom: 2px; }
 .add-results { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 4px; }
 .add-results .menu-item { white-space: normal; text-align: left; } .add-results > p { margin: 8px 10px; }
+/* Add a bet's legs: the bet so far (heading with its count), what was just added, then the leg being filled in */
+.add-legs-h { margin: 4px 0 0; } .add-legs-h .mut { font-weight: 500; }
+.add-added { margin: 0; font-size: 13px; font-weight: 600; } .add-added:empty { display: none; }
+.add-draft.more { border: 1px dashed var(--line); border-radius: 16px; padding: 12px; margin: 8px 0 4px; }
+.add-draft-h { margin: 0 0 8px; font-weight: 700; font-size: 14px; }
+.add-leg-preview { margin: 8px 0 0; font-size: 13px; }
+.track-fields .add-side { grid-column: 1 / -1; }   /* At least / Over / Under on a row of its own, so it never clips */
+.add-leg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
+.add-leg-actions .primary { display: inline-flex; align-items: center; gap: 6px; } .add-leg-actions .mut { font-size: 12px; }
 .add-player { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--chip); }
 .add-player .link { font-size: 13px; font-weight: 600; flex: none; }
 .track-legs li > span > .mut { white-space: nowrap; }   /* "3-pointers made" never breaks at its hyphen */
@@ -1119,6 +1128,9 @@ main:focus { outline: none; }
 .bet-confirm { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--bad) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); }
 .bet-confirm p { margin: 0 0 8px; font-size: 14px; }
 .bet-confirm .bet-edit-row { align-items: center; }
+/* a parlay with a voided leg whose price isn't known: what the book paid settles it */
+.bet-needs-payout { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.bet-needs-payout p { margin: 0 0 8px; } .bet-needs-payout .auth-label { display: flex; flex-direction: column; gap: 4px; width: 140px; }
 button.danger-btn { background: var(--bad); color: var(--card); border: 0; padding: 8px 14px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; }
 button.danger-btn:disabled { opacity: .6; cursor: default; }
 button.danger-btn:focus-visible { outline: 2px solid var(--bad); outline-offset: 2px; }

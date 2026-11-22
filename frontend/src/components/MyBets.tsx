@@ -72,6 +72,11 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const [promo, setPromo] = useState(promoOf(bet));
   const [problem, setProblem] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // a parlay whose voided leg has no known price: what the book paid, as typed
+  const [paid, setPaid] = useState("");
+  const paidN = Number(paid.replace(/[$,\s]/g, ""));
+  const paidOk = paid.trim() !== "" && Number.isFinite(paidN) && paidN >= 0;
+  const dropped = bet.legs.filter((l) => l.result === "void" || l.result === "push");
   const card = useRef<HTMLElement>(null);
   // closing the edit form or the delete question hands focus back to the card's ⋯ button, rather than to the page
   const backToMenu = () => requestAnimationFrame(() => card.current?.querySelector<HTMLElement>(".bet-head .icon-btn")?.focus());
@@ -146,7 +151,8 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
       ) : (
         <p className="bet-foot mut">
           {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>{bet.boost && <>, boosted {bet.boost}%</>}
-          {bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b>{bet.no_sweat && <>, or <b>{money(bet.no_sweat)}</b> back as a bonus bet if it loses</>}</>
+          {bet.needs_payout ? <> → pays less than <b>{money(bet.to_pay)}</b>, with {dropped.length === 1 ? "a leg" : `${dropped.length} legs`} out</>
+            : bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b>{bet.no_sweat && <>, or <b>{money(bet.no_sweat)}</b> back as a bonus bet if it loses</>}</>
             : bonusBack ? <> → the bonus bet came back</> : bet.payout != null && <> → returned <b>{money(bet.payout)}</b></>}
           {bet.refund > 0 && <>, plus <b>{money(bet.refund)}</b> back as a bonus bet</>}
           {" · "}placed {new Date(bet.placed_at + "Z").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
@@ -154,6 +160,18 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
             title="What this price was worth by the market's closing line, the best early sign of a good bet">{signedPct(bet.ev_close)} vs the close</span></>}
           {bet.settled_by === "user" && " · settled by you"}
         </p>
+      )}
+      {bet.needs_payout && !editing && !confirming && (
+        <form className="board-note bet-needs-payout" onSubmit={(e) => { e.preventDefault(); if (paidOk) save.mutate({ status: "won", payout: Math.round(paidN * 100) / 100 }); }}>
+          <p><b>{dropped.map((l) => l.name).join(" and ")}</b> {dropped.length === 1 ? "was" : "were"} {dropped.every((l) => l.result === "push") ? "a push" : "voided"},
+            so {bet.book} pays the rest at a lower price. {dropped.length === 1 ? "That leg's" : "Their"} price wasn't on your slip or in the odds this site
+            saved, so the payout can't be worked out. Enter what {bet.book} paid back to settle it.</p>
+          <div className="bet-edit-row">
+            <label className="auth-label">Paid back<input className="auth-input" inputMode="decimal" autoComplete="off" value={paid} placeholder="$0.00"
+              aria-invalid={paid.trim() !== "" && !paidOk} onChange={(e) => setPaid(e.target.value)} /></label>
+            <button className="primary" disabled={!paidOk || save.isPending}>{save.isPending ? "Saving…" : "Settle as won"}</button>
+          </div>
+        </form>
       )}
       {problem && <p className="err">{problem}</p>}
     </article>

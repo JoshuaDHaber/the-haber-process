@@ -28,6 +28,9 @@ export interface TrackedBet {
   no_sweat: number | null; refund: number;
   /** An early-win token on a single moneyline: the lead (points) that pays it as a win, whatever the final score. */
   early_win: number | null;
+  /** Every leg is in and none lost, but a leg that voided or pushed has no known price, so the payout can't be worked out:
+   *  the bettor enters what the book paid. */
+  needs_payout: boolean;
   /** Recorded after its first game had started (up to LATE_DAYS later): the bettor may have known how it went. */
   late: boolean;
   placed_at: string; settled_at: string | null; started: boolean; legs: TrackedLeg[];
@@ -81,7 +84,8 @@ export async function trackBets(book: string, legs: Leg[], asParlay: boolean, st
   return out;
 }
 
-export const editBet = (id: number, patch: { stake?: number; odds?: number; notes?: string; status?: BetStatus; tags?: string[] } & Partial<PromoBody>) =>
+export const editBet = (id: number, patch: { stake?: number; odds?: number; notes?: string; status?: BetStatus; tags?: string[];
+  /** with status "won": what the book actually paid back */ payout?: number } & Partial<PromoBody>) =>
   call<TrackedBet>(`bets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const deleteBet = (id: number) => call<void>(`bets/${id}`, { method: "DELETE" });
 
