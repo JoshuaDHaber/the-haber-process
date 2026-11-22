@@ -239,7 +239,7 @@ function takeSharedText(keep: boolean): string | null {
 export const readSlipText = (text: string) =>
   call<ScreenDraft>("bets/read-slip-text", { method: "POST", body: JSON.stringify({ text: text.slice(0, 20000) }) });
 /** The free way, when Claude isn't set up: OCR reads the screenshot on this device (Tesseract.js, loaded only when needed),
- * and only its text goes to the server, which knows bet365's, FanDuel's and DraftKings' layouts (backend slip_text). */
+ * and only its text goes to the server, which knows bet365's, FanDuel's, DraftKings' and Fanatics' layouts (backend slip_text). */
 export async function readSlipOnDevice(file: File): Promise<ScreenDraft> {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
