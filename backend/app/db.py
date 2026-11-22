@@ -632,18 +632,23 @@ def current_lines(session, table=None):
     hit = per_engine.get(table.__tablename__)
     if hit and hit[0] == version:
         return hit[1]
-    rows = session.scalars(select(table).order_by(table.id)).all()   # id order, as SQLite gave it: ties break the same way on Postgres
+    # Plain column tuples, not ORM objects: the NBA table is 150k+ rows, and loading them as objects peaked at ~430 MB
+    # of the web process's memory, most of which it never handed back.
+    cols = ["player", "market", "line", "over_odds", "under_odds", "book", "over_link", "under_link", "event_link",
+            "game_id", "fetched_at"]
+    rows = session.execute(select(*(getattr(table, c) for c in cols)).order_by(table.id)).all()   # id order, as SQLite gave it: ties break the same way on Postgres
     newest = {}
     for r in rows:
         k = (r.market, r.game_id)
         if k not in newest or r.fetched_at > newest[k]:
             newest[k] = r.fetched_at
-    keep = [r for r in rows if r.fetched_at == newest[(r.market, r.game_id)]]
-    df = pd.DataFrame([dict(player=r.player, market=r.market, line=r.line, over_odds=r.over_odds,
-                            under_odds=r.under_odds, book=r.book, over_link=r.over_link, under_link=r.under_link,
-                            event_link=r.event_link, game_id=r.game_id, fetched_at=r.fetched_at) for r in keep],
-                      columns=["player", "market", "line", "over_odds", "under_odds", "book", "over_link",
-                               "under_link", "event_link", "game_id", "fetched_at"])
+    # One copy of each repeated string (player, market, book, game, event link) instead of one per row: the cached
+    # frame lives as long as the process, and this roughly halves it. Same values and dtypes either way.
+    canon = {}
+    one = lambda v: canon.setdefault(v, v) if isinstance(v, str) else v
+    keep = [tuple(map(one, r)) for r in rows if r.fetched_at == newest[(r.market, r.game_id)]]
+    del rows
+    df = pd.DataFrame.from_records(keep, columns=cols)
     per_engine[table.__tablename__] = (version, df)
     return df   # shared between requests: callers filter or copy it, never change it in place
 
