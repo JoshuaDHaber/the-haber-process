@@ -58,6 +58,19 @@ def test_week_12_holiday_games_each_get_a_game_day_price_pull_before_kickoff():
     assert scheduler.describe(scheduler.BY_ID["w12-wed-lines"]) == "Wed Nov 25 4:00 PM ET"
 
 
+def test_christmas_day_games_get_a_game_day_price_pull_before_the_first_kickoff():
+    # Fri 12/25: 1 PM, 4:30 PM and 8:15 PM; Fridays have no weekly 'today' slot. December is EST (UTC-5)
+    slot = scheduler.BY_ID["w16-christmas"]
+    assert slot.odds == "today" and scheduler.describe(slot) == "Fri Dec 25 11:00 AM ET"
+    assert scheduler.next_fire(slot, datetime(2026, 11, 22)) == datetime(2026, 12, 25, 16) < datetime(2026, 12, 25, 18)
+
+
+def test_week_15_saturday_games_are_covered_by_the_weekly_saturday_slot():
+    # Sat 12/19 SEA @ PHI 5 PM and CHI @ BUF 8:20 PM: the 10 AM Saturday slot already pulls game-day lines
+    sat = scheduler.BY_ID["sat-injuries"]
+    assert sat.odds == "today" and scheduler.next_fire(sat, datetime(2026, 12, 18, 17)) == datetime(2026, 12, 19, 15)
+
+
 def test_a_one_off_slot_fires_once_then_drops_out_of_the_schedule():
     slot = scheduler.BY_ID["w12-thanksgiving"]
     before, at, after = datetime(2026, 11, 20), datetime(2026, 11, 26, 16), datetime(2026, 12, 1)

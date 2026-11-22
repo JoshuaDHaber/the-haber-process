@@ -75,6 +75,9 @@ SLOTS = [
              "the 4 PM Thursday slot (about 33 credits)"),
     Slot("w12-black-friday", "Black Friday lines (Week 12)", (), 11, 0, "today", dates=(date(2026, 11, 27),),
          why="Model run, plus fresh main lines for DEN @ PIT, the 3 PM Friday game (about 11 credits)"),
+    Slot("w16-christmas", "Christmas lines (Week 16)", (), 11, 0, "today", dates=(date(2026, 12, 25),),
+         why="Model run, plus fresh main lines for all three Christmas Day games (1 PM, 4:30 PM, 8:15 PM), which no "
+             "weekly slot pulls on a Friday (about 33 credits)"),
 ]
 BY_ID = {s.id: s for s in SLOTS}
 
