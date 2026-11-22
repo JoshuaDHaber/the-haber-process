@@ -172,7 +172,40 @@ def settle(bet: Bet, now: Optional[datetime] = None) -> None:
 
 def _settle_touched(session, legs: list, now: datetime) -> None:
     for bet in {leg.bet for leg in legs}:
+        fill_dropped_prices(session, bet)
         settle(bet, now)
+
+
+def fill_dropped_prices(session, bet: Bet) -> None:
+    """A parlay leg that pushed or voided drops out, and the payout is worked out by dividing out its price; most slips
+    show only the parlay's price, so the leg's own often isn't recorded. Fill it from the book's own quote for that exact
+    line (main or alternate), the last one before the game started. Left unknown when the book's price wasn't stored:
+    the bettor then enters what the book paid (BetPatch.payout)."""
+    if len(bet.legs) < 2:
+        return
+    from .db import AltLine, NbaAltLine, NbaOddsLine, OddsLine
+    for leg in bet.legs:
+        if leg.result not in ("push", "void") or leg.odds != NO_ODDS or leg.kind in (CUSTOM, ML):
+            continue
+        tables = (NbaOddsLine, NbaAltLine) if league_of(leg.kind, leg.game_id) == "nba" else (OddsLine, AltLine)
+        best = None
+        for model in tables:
+            row = session.scalars(select(model).where(func.lower(model.book) == bet.book.lower(), model.player == leg.name,
+                                                      model.market == leg.kind, model.line == leg.line, model.fetched_at <= leg.kickoff)
+                                  .order_by(model.fetched_at.desc()).limit(1)).first()
+            price = row and (row.over_odds if leg.side == "Over" else row.under_odds)
+            if price and valid_odds(int(round(price))) and (best is None or row.fetched_at > best[0]):
+                best = (row.fetched_at, int(round(price)))
+        if best:
+            leg.odds = best[1]
+
+
+def needs_payout(bet: Bet) -> bool:
+    """Every leg is in and none lost, but a leg that dropped out has no known price, so the payout can't be worked out:
+    the bettor enters what the book paid."""
+    results = [leg.result for leg in bet.legs]
+    return (bet.status == "open" and bet.settled_by is None and len(bet.legs) > 1 and None not in results and "loss" not in results
+            and "win" in results and any(leg.result in ("push", "void") and leg.odds == NO_ODDS for leg in bet.legs))
 
 
 def grade_nfl(session, stats: pd.DataFrame, sched: pd.DataFrame, now: Optional[datetime] = None, leads: Optional[pd.DataFrame] = None) -> int:
@@ -234,12 +267,13 @@ def _nfl_leads(season: int) -> pd.DataFrame:
 
 
 def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable] = None, now: Optional[datetime] = None,
-              lead_of: Optional[Callable] = None) -> int:
+              lead_of: Optional[Callable] = None, box_of: Optional[Callable] = None) -> int:
     """Grade open NBA legs from games before today (Eastern) against the ESPN game logs, with nba/grading.py's rules: a
     player missing from a finished box score is void once he has played again or two days have passed, and a box score
     that never appears (a postponement) voids the leg after a week. A moneyline with an early-win token that didn't win
-    outright is settled by its team's largest lead (ESPN: lead_of(event id) -> (home, away)). Settles their bets; returns
-    how many legs were graded."""
+    outright is settled by its team's largest lead (ESPN: lead_of(event id) -> (home, away)). A player missing from his
+    game's logs is void straight away when the game's final box score (box_of(event id) -> who played) leaves him out,
+    rather than after the wait. Settles their bets; returns how many legs were graded."""
     from .nba import espn, model
     from .nba.grading import STALE_AFTER_DAYS, VOID_AFTER_DAYS
     fetch = fetch or espn.gamelogs
@@ -258,6 +292,9 @@ def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable
     last_game = logs.groupby("player_id").date.max().to_dict() if not logs.empty else {}
     has_scores = any(leg.kind == ML for leg in todo) and {"event_id", "home_score", "away_score"} <= set(logs.columns)
     scores = {(g.date, g.home_team, g.away_team): g for g in espn.team_games(logs).itertuples()} if has_scores else {}
+    events = ({(g.date, g.home_team, g.away_team): g.event_id for g in espn.team_games(logs).itertuples()}
+              if {"event_id", "home_score", "away_score"} <= set(logs.columns) else {})
+    boxes: dict = {}   # event id -> who played (one box score read per game)
     done = []
     for leg in todo:
         _, _, away, home = leg.game_id.split("_", 3)
@@ -288,7 +325,12 @@ def grade_nba(session, logs: pd.DataFrame, today: date, fetch: Optional[Callable
         else:
             st = by_player.get((leg.player_id, leg.gameday))
             if st is None and last_game.get(leg.player_id, "") <= leg.gameday and age < VOID_AFTER_DAYS:
-                continue
+                event = events.get((leg.gameday, home, away))
+                if event not in boxes:
+                    box_of = box_of or espn.played
+                    boxes[event] = box_of(str(event)) if event is not None else None
+                if boxes[event] is None or leg.player_id in boxes[event]:
+                    continue   # no final box score to say, or he played and his log hasn't caught up: wait
             v = None if st is None or not st.min else model.actual(st, leg.kind)
             leg.actual = None if v is None or pd.isna(v) else float(v)
         leg.result, leg.graded_at = grading.outcome(leg.side, leg.line, leg.actual), now
@@ -369,7 +411,7 @@ def _out(bet: Bet, now: datetime) -> BetOut:
         id=bet.id, league=bet.league, book=bet.book, kind=bet.kind, stake=bet.stake, odds=bet.odds, status=bet.status,
         payout=bet.payout, profit=round(bet.payout - cost(bet), 2) if settled and bet.payout is not None else None,
         to_pay=returned(bet, "won"), settled_by=bet.settled_by, notes=bet.notes, tags=bet.tags or [],
-        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, no_sweat=bet.no_sweat, refund=refund(bet), early_win=bet.early_win,
+        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, no_sweat=bet.no_sweat, refund=refund(bet), early_win=bet.early_win, needs_payout=needs_payout(bet),
         placed_at=bet.placed_at.isoformat(), settled_at=bet.settled_at.isoformat() if bet.settled_at else None,
         started=min(leg.kickoff for leg in bet.legs) <= now, ev_close=bet_ev_close(bet), late=bool(bet.late),
         legs=[BetLegOut(id=leg.id, game_id=leg.game_id, gameday=leg.gameday, kickoff=leg.kickoff.isoformat(), player_id=leg.player_id,
@@ -676,7 +718,12 @@ def edit(bet_id: int, body: BetPatch, user: User = Depends(require_member), db: 
     if body.status == "open":
         bet.settled_by = None
     elif body.status is not None:
-        bet.status, bet.payout, bet.settled_by, bet.settled_at = body.status, returned(bet, body.status), "user", now
+        paid = returned(bet, body.status)
+        if body.payout is not None and body.status == "won":
+            if not 0 <= body.payout <= MAX_STAKE * 1000:
+                raise HTTPException(422, "Enter what the book paid back, in dollars")
+            paid = round(body.payout, 2)   # what the book actually paid (a voided leg repriced it, say)
+        bet.status, bet.payout, bet.settled_by, bet.settled_at = body.status, paid, "user", now
     if bet.settled_by == "user" and body.status is None and (body.stake is not None or body.odds is not None or promo):
         bet.payout = returned(bet, bet.status)
     if bet.settled_by != "user":

@@ -258,6 +258,22 @@ def gamelogs(player_ids, seasons, current: int, log=print) -> pd.DataFrame:
     return df.drop_duplicates(["player_id", "event_id"]).sort_values(["date", "event_id"]).reset_index(drop=True)
 
 
+def played(event_id: str) -> Optional[set]:
+    """The athletes (ESPN ids) who got into a finished game, from its box score; None if it isn't final or can't be read.
+    Players who sat are either listed with didNotPlay or, when inactive, left out entirely: anyone not in this set didn't
+    play. It's authoritative as soon as the game ends, unlike the players' game logs, which can lag a day."""
+    try:
+        js = get_json(f"{SITE}/summary?event={event_id}", max_age_hours=2)
+    except (requests.RequestException, ValueError):
+        return None
+    status = (js.get("header", {}).get("competitions") or [{}])[0].get("status", {}).get("type", {})
+    teams = js.get("boxscore", {}).get("players") or []
+    if not status.get("completed") or len(teams) < 2:
+        return None
+    return {str(a["athlete"]["id"]) for t in teams for g in t.get("statistics", []) for a in g.get("athletes", [])
+            if not a.get("didNotPlay") and a.get("stats") and a.get("athlete", {}).get("id")}
+
+
 def team_games(logs: pd.DataFrame) -> pd.DataFrame:
     """One row per game (home, away, scores, date, season), rebuilt from the players' logs."""
     if logs.empty:

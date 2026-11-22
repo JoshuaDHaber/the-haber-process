@@ -3,6 +3,7 @@ import re
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+from sqlalchemy import delete
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -359,6 +360,75 @@ def test_grade_nba_from_game_logs():
         assert bets.grade_nba(s, logs, date.today(), fetch=lambda *a, **k: pd.DataFrame()) == 1
         b = s.get(Bet, bid)
         assert (b.legs[0].actual, b.status) == (34.0, "won") and b.payout == pytest.approx(10 * (1 + 100 / 120), abs=0.01)
+
+
+def test_a_player_left_out_of_the_final_box_score_is_void_straight_away():
+    """Inactive players aren't in ESPN's box score at all, and the game logs can lag a day: the final box score settles it."""
+    today = espn.today_et()
+    day = (today - timedelta(days=1)).isoformat()
+    game = "2098_20981103_BOS_NYK"
+    sat = tracked([dict(game_id=game, gameday=day, player_id="901", kind="pts", side="Over", line=20.5, odds=-110)], kind="single", odds=-110)
+    lagging = tracked([dict(game_id=game, gameday=day, player_id="902", kind="pts", side="Over", line=20.5, odds=-110)], kind="single", odds=-110)
+    logs = pd.DataFrame([dict(player_id="88", event_id="e3", season=2099, date=day, team="BOS", opp="NYK", home=False, home_score=101,
+                              away_score=99, min=30, pts=10, reb=3, ast=2),
+                         dict(player_id="89", event_id="e3", season=2099, date=day, team="NYK", opp="BOS", home=True, home_score=101,
+                              away_score=99, min=30, pts=12, reb=3, ast=2)])
+    reads = []
+    box = lambda event: (reads.append(event), {"88", "89", "902"})[1]   # 902 played; his log just hasn't arrived
+    with SessionLocal() as s:
+        bets.grade_nba(s, logs, today, fetch=lambda *a, **k: pd.DataFrame(), box_of=box)
+        assert (s.get(Bet, sat).legs[0].result, s.get(Bet, sat).status) == ("void", "void")
+        assert s.get(Bet, lagging).status == "open"
+    assert reads == ["e3"]   # one box score read for the game
+    with SessionLocal() as s:   # no final box score yet: wait, as before
+        bets.grade_nba(s, logs, today, fetch=lambda *a, **k: pd.DataFrame(), box_of=lambda e: None)
+        assert s.get(Bet, lagging).status == "open"
+        for bid in (sat, lagging):   # an open leg from "yesterday" would send later tests' grading off to fetch him
+            s.execute(delete(BetLeg).where(BetLeg.bet_id == bid))
+            s.delete(s.get(Bet, bid))
+        s.commit()
+
+
+def test_a_voided_legs_missing_price_comes_from_the_books_quote_or_the_bettor_enters_the_payout(sent):
+    """A parlay pays on its other legs when one voids, dividing out the voided leg's price. A slip rarely shows each leg's
+    price: it's taken from the book's stored quote for that line, and when there isn't one the bettor enters the payout."""
+    from app.db import NbaAltLine
+    ko = datetime.utcnow() - timedelta(hours=10)
+    def parlay(names):
+        bid = tracked([dict(game_id="2098_20981104_BOS_NYK", gameday="2098-11-04", player_id=f"p{i}", kind="threes", side="Over", line=1.5,
+                            odds=-150 if i == 0 else 0, result="win" if i == 0 else "void") for i, _ in enumerate(names)],
+                      kind="parlay", odds=300)
+        with SessionLocal() as s:
+            for lg, n in zip(s.get(Bet, bid).legs, names):
+                lg.name, lg.kickoff = n, ko
+            s.commit()
+        return bid
+    priced, unknown = parlay(["Cedric Coward", "Jayson Tatum"]), parlay(["Cedric Coward", "Nobody Quoted"])
+    with SessionLocal() as s:
+        q = NbaAltLine(fetched_at=ko - timedelta(hours=2), game_id="2098_20981104_BOS_NYK", player="Jayson Tatum", market="threes", line=1.5,
+                       over_odds=120.0, under_odds=None, book="FanDuel")
+        late = NbaAltLine(fetched_at=ko + timedelta(hours=1), game_id="2098_20981104_BOS_NYK", player="Jayson Tatum", market="threes", line=1.5,
+                          over_odds=900.0, under_odds=None, book="FanDuel")   # after tip-off: not the price taken
+        s.add_all([q, late])
+        s.commit()
+        for bid in (priced, unknown):
+            b = s.get(Bet, bid)
+            bets._settle_touched(s, list(b.legs), datetime.utcnow())
+        s.commit()
+        p, u = s.get(Bet, priced), s.get(Bet, unknown)
+        assert p.legs[1].odds == 120 and p.status == "won" and p.payout == pytest.approx(10 * 4.0 / 2.2, abs=0.01)
+        assert u.status == "open" and bets.needs_payout(u)
+        s.delete(q), s.delete(late)
+        s.commit()
+    with member(sent, "voided@example.com", "198.51.100.44") as c:
+        with SessionLocal() as s:   # hand the stuck bet to this member to settle it through the API
+            s.get(Bet, unknown).user_id = s.query(User).filter(User.email == "voided@example.com").one().id
+            s.commit()
+        out = next(b for b in c.get("/api/me/bets").json()["bets"] if b["id"] == unknown)
+        assert out["needs_payout"] and out["status"] == "open"
+        r = c.patch(f"/api/me/bets/{unknown}", json={"status": "won", "payout": 16.5}).json()
+        assert (r["status"], r["payout"], r["profit"], r["settled_by"], r["needs_payout"]) == ("won", 16.5, 6.5, "user", False)
+        assert c.patch(f"/api/me/bets/{unknown}", json={"status": "won", "payout": -1}).status_code == 422
 
 
 def test_moneylines_are_tracked_with_props_and_graded_from_the_final_score(sent):

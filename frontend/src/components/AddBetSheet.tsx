@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconPhoto, IconX } from "@tabler/icons-react";
+import { IconPhoto, IconPlus, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
@@ -28,6 +28,8 @@ const IOS = typeof navigator !== "undefined" && (/iPhone|iPad|iPod/.test(navigat
 /** The parlay price its legs make together, when every leg's own price is known (most slips show only the parlay's). */
 const legsPrice = (legs: ManualLeg[]) =>
   legs.every((l) => l.odds != null) ? toAmerican(legs.reduce((d, l) => d * toDecimal(l.odds!), 1)) : null;
+// markets books mostly offer as "n or more" (alternate lines): a new leg in one starts as "At least"
+const COUNTS = new Set<string>(["threes", "stl", "blk", "recs", "ptd"]);
 const when = (iso: string) => new Date(iso + "Z").toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** My bets → "Add a bet": record a bet placed outside the app. Before its game starts is the rule; one the bettor forgot can
@@ -64,6 +66,10 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const [kind, setKind] = useState<Kind | "">("");
   const [side, setSide] = useState<"Over" | "Under">("Over");
   const [line, setLine] = useState("");
+  // "At least": the leg as books write their alternate lines ("2+ 3-pointers made"), a whole number that's Over n - 0.5
+  const [atLeast, setAtLeast] = useState(false);
+  // the leg just added, said back (and read out) so it's clear it went onto the bet
+  const [added, setAdded] = useState("");
   const [legOdds, setLegOdds] = useState("");
   const [legs, setLegs] = useState<ManualLeg[]>([]);
   const [parlayOdds, setParlayOdds] = useState("");
@@ -78,17 +84,34 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const stakeN = Number(stake.replace(/[$,\s]/g, ""));
   const stakeOk = Number.isFinite(stakeN) && stakeN > 0;
   const yesNo = !!kind && isYesNo(kind);
-  const lineN = yesNo ? 0.5 : Number(line);
+  const count = atLeast && !yesNo ? Number(line.trim().replace(/\+$/, "")) : NaN;
+  const countOk = Number.isInteger(count) && count >= 1;
+  const lineN = yesNo ? 0.5 : atLeast ? (countOk ? count - 0.5 : NaN) : Number(line);
   const legOddsN = parseOdds(legOdds);
   const legReady = !!player && !!kind && Number.isFinite(lineN) && line.trim() !== "" || (yesNo && !!player);
+  // a typed "2+" means at least 2, whichever way the leg was set
+  const typeLine = (v: string) => {
+    const m = v.trim().match(/^(\d+)\s*\+$/);
+    if (m && !atLeast) { setAtLeast(true); setSide("Over"); setLine(m[1]); return; }
+    setLine(v);
+  };
+  const legText = (l: { player: BetPlayer; kind: Kind; side: "Over" | "Under"; line: number }) =>
+    `${l.player.name} ${isYesNo(l.kind) ? playLabel(l.kind, l.side, l.line) : `${playLabel(l.kind, l.side, l.line)} ${KIND_LABEL[l.kind].toLowerCase()}`}`;
   // a leg's own price is optional in a parlay (books usually show only the parlay's); a single needs one
   const canAddLeg = legReady && (!!legOddsN || legOdds.trim() === "");
-  const pickPlayer = (p: BetPlayer) => { setPlayer(p); setKind(p.kinds[0] ?? ""); setQ(""); setSide("Over"); setLine(""); setLegOdds(""); };
+  const pickPlayer = (p: BetPlayer) => {
+    const k = p.kinds[0] ?? "";
+    setPlayer(p); setKind(k); setQ(""); setSide("Over"); setLine(""); setLegOdds(""); setAtLeast(!!k && COUNTS.has(k)); setAdded("");
+  };
+  const pickKind = (k: Kind) => { setKind(k); if (!line.trim()) setAtLeast(COUNTS.has(k)); };
   const addLeg = () => {
-    if (!player || !kind) return;
-    const next: ManualLeg[] = [...legs, { player, kind, side, line: lineN, odds: legOddsN }];
+    if (!player || !kind || !canAddLeg) return;
+    const leg = { player, kind: kind as Kind, side, line: lineN, odds: legOddsN };
+    const next: ManualLeg[] = [...legs, leg];
     setLegs(next);
-    setPlayer(null); setKind(""); setLine(""); setLegOdds("");
+    setAdded(`Leg ${next.length} added: ${legText(leg)}. Search for the next player, or fill in the stake below.`);
+    setPlayer(null); setKind(""); setLine(""); setLegOdds(""); setAtLeast(false);
+    requestAnimationFrame(() => document.getElementById("add-player")?.focus());
     const price = next.length > 1 ? legsPrice(next) : null;
     if (price != null && !parlayOdds) setParlayOdds(americanOdds(price));
   };
@@ -217,7 +240,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
         </div>
 
         {mode === "prop" ? <>
-          {legs.length > 0 && (
+          {legs.length > 0 && <>
+            <h3 className="sub-h add-legs-h">Your bet <span className="mut">· {legs.length + (canAddLeg ? 1 : 0)} {legs.length + (canAddLeg ? 1 : 0) === 1 ? "leg" : "legs"}
+              {legs.length + (canAddLeg ? 1 : 0) > 1 ? " (parlay)" : ""}</span></h3>
             <ul className="track-legs">
               {legs.map((l, i) => (
                 <li key={l.custom ? `custom-${i}` : `${l.player.player_id}-${l.kind}-${i}`}>
@@ -230,9 +255,12 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
                 </li>
               ))}
             </ul>
-          )}
+          </>}
+          <p className="add-added pos" role="status" aria-live="polite">{added}</p>
+          <div className={`add-draft${legs.length ? " more" : ""}`}>
+          {legs.length > 0 && <p className="add-draft-h">Leg {legs.length + 1} <span className="mut">· optional</span></p>}
           {!player ? <>
-            <label className="auth-label" htmlFor="add-player">{legs.length ? "Add another leg" : "Player"}</label>
+            <label className="auth-label" htmlFor="add-player">Player</label>
             <input id="add-player" className="auth-input" value={q} placeholder="Search players by name" autoComplete="off"
               onChange={(e) => setQ(e.target.value)} />
             {query.length >= 2 && (
@@ -254,27 +282,50 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
             </div>
             <div className="track-fields">
               <label className="auth-label">Market
-                <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+                <select value={kind} onChange={(e) => pickKind(e.target.value as Kind)}>
                   {player.kinds.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
                 </select>
               </label>
-              <div className="auth-label">Side
+              <div className="auth-label add-side">Side
                 <div className="seg small" role="group" aria-label="Side">
-                  {(["Over", "Under"] as const).map((s) => (
-                    <button type="button" key={s} className={side === s ? "on" : ""} aria-pressed={side === s} onClick={() => setSide(s)}>
-                      {yesNo ? (s === "Over" ? "Yes" : "No") : s}</button>
-                  ))}
+                  {yesNo ? (["Over", "Under"] as const).map((s) => (
+                    <button type="button" key={s} className={side === s ? "on" : ""} aria-pressed={side === s} onClick={() => setSide(s)}>{s === "Over" ? "Yes" : "No"}</button>
+                  )) : ([["least", "At least"], ["Over", "Over"], ["Under", "Under"]] as const).map(([k, label]) => {
+                    const on = k === "least" ? atLeast : !atLeast && side === k;
+                    return <button type="button" key={k} className={on ? "on" : ""} aria-pressed={on}
+                      onClick={() => {
+                        const n = Number(line.trim().replace(/\+$/, ""));
+                        if (k === "least") { setAtLeast(true); setSide("Over"); if (line.trim() && !atLeast && Number.isFinite(n)) setLine(String(Math.ceil(n))); }
+                        else { if (atLeast && Number.isInteger(n) && n >= 1) setLine(String(n - 0.5)); setAtLeast(false); setSide(k); }
+                      }}>{label}</button>;
+                  })}
                 </div>
               </div>
-              {!yesNo && <label className="auth-label">Line<input className="auth-input" inputMode="decimal" value={line} placeholder="e.g. 64.5" onChange={(e) => setLine(e.target.value)} /></label>}
+              {!yesNo && (atLeast
+                ? <label className="auth-label">How many<span className="promo-input"><input className="auth-input" inputMode="numeric" value={line} placeholder="e.g. 2"
+                    aria-invalid={line.trim() !== "" && !countOk} aria-describedby="add-count-hint" onChange={(e) => setLine(e.target.value)} /><span className="mut">+</span></span></label>
+                : <label className="auth-label">Line<input className="auth-input" inputMode="decimal" value={line} placeholder="e.g. 64.5"
+                    onChange={(e) => typeLine(e.target.value)} /></label>)}
               <label className="auth-label">Odds<input className="auth-input" value={legOdds} placeholder={legs.length ? "If shown" : "e.g. -110"} onChange={(e) => setLegOdds(e.target.value)} aria-invalid={legOdds !== "" && !legOddsN} /></label>
             </div>
-            {canAddLeg && <p className="mut">{player.name} {playLabel(kind as Kind, side, lineN)} {!yesNo && KIND_LABEL[kind as Kind].toLowerCase()}{legOddsN ? ` at ${americanOdds(legOddsN)}` : ""}
-              {" · "}<button type="button" className="link" onClick={addLeg}>Add another leg (parlay)</button></p>}
+            <p className="mut add-leg-preview" id="add-count-hint" aria-live="polite">
+              {atLeast && !yesNo
+                ? (countOk ? <>{count}+ {KIND_LABEL[kind as Kind].toLowerCase()} is <b>Over {count - 0.5}</b>, as it's graded{legOddsN ? ` · at ${americanOdds(legOddsN)}` : ""}</>
+                  : `A whole number: 2+ means ${KIND_LABEL[kind as Kind]?.toLowerCase() ?? "it"} of 2 or more (Over 1.5).`)
+                : canAddLeg ? <>{legText({ player, kind: kind as Kind, side, line: lineN })}{legOddsN ? ` at ${americanOdds(legOddsN)}` : ""}</> : "Type the line, or switch to At least for a 2+ style prop."}
+            </p>
+            <div className="add-leg-actions">
+              <button type="button" className="primary outline" disabled={!canAddLeg} onClick={addLeg}
+                title={canAddLeg ? undefined : legReady ? "The odds aren't a price yet, like -110 or +150" : "Fill in the line first"}>
+                <IconPlus size={16} stroke={1.75} aria-hidden />{legs.length ? "Add this leg" : "Add another leg"}</button>
+              {legs.length === 0 && <span className="mut">{canAddLeg ? "Saving now records a single. Add another leg to make it a parlay." : ""}</span>}
+              {legs.length > 0 && <button type="button" className="link" onClick={() => { setPlayer(null); setLine(""); setLegOdds(""); }}>Skip this leg</button>}
+            </div>
           </>}
+          </div>
           {allLegs.length > 1 && (
             <label className="auth-label">Parlay odds{book ? ` at ${book}` : ""}
-              <input className="auth-input" value={parlayOdds || (parlayN ? americanOdds(parlayN) : "")} onChange={(e) => setParlayOdds(e.target.value)} />
+              <input className="auth-input" value={parlayOdds || (parlayN ? americanOdds(parlayN) : "")} placeholder="From your slip, like +600" onChange={(e) => setParlayOdds(e.target.value)} />
             </label>
           )}
         </> : <>
