@@ -10,7 +10,7 @@ import queue
 import threading
 import traceback
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
@@ -39,6 +39,7 @@ class Slot:
     full: bool = False      # refit the calibration
     why: str = ""
     league: str = "nfl"     # nfl | nba
+    dates: tuple[date, ...] = ()   # a one-off slot: runs on these Eastern dates only (days is ignored), then never again
 
 
 EVERY_DAY = (0, 1, 2, 3, 4, 5, 6)
@@ -65,6 +66,18 @@ SLOTS = [
          why="NBA model run, moneylines, and props for today's games that had none in the morning"),
     Slot("nba-pregame", "NBA pregame", EVERY_DAY, 18, 0, "all", league="nba",
          why="NBA model run with the late injury news, and a fresh pull of tonight's props and moneylines (4 per game)"),
+    # One-off game days the weekly slots miss (a game with no 'today' pull before kickoff). They stop firing after their
+    # date, so they can stay here until someone tidies up; their past runs keep their labels in the log.
+    Slot("w12-wed-lines", "Wednesday night lines (Week 12)", (), 16, 0, "today", dates=(date(2026, 11, 25),),
+         why="Model run, plus fresh main lines for GB @ LA, the 8 PM Wednesday game before Thanksgiving (about 11 credits)"),
+    Slot("w12-thanksgiving", "Thanksgiving lines (Week 12)", (), 11, 0, "today", dates=(date(2026, 11, 26),),
+         why="Model run, plus fresh main lines for all three Thanksgiving games: CHI @ DET kicks off at 1 PM, before "
+             "the 4 PM Thursday slot (about 33 credits)"),
+    Slot("w12-black-friday", "Black Friday lines (Week 12)", (), 11, 0, "today", dates=(date(2026, 11, 27),),
+         why="Model run, plus fresh main lines for DEN @ PIT, the 3 PM Friday game (about 11 credits)"),
+    Slot("w16-christmas", "Christmas lines (Week 16)", (), 11, 0, "today", dates=(date(2026, 12, 25),),
+         why="Model run, plus fresh main lines for all three Christmas Day games (1 PM, 4:30 PM, 8:15 PM), which no "
+             "weekly slot pulls on a Friday (about 33 credits)"),
 ]
 BY_ID = {s.id: s for s in SLOTS}
 
@@ -74,7 +87,12 @@ def _utc(local: datetime) -> datetime:
 
 
 def _local_times(slot: Slot, now: datetime, step: int):
-    """Slot times from now's Eastern date, walking forward (step 1) or back (-1) day by day; naive UTC."""
+    """Slot times from now's Eastern date, walking forward (step 1) or back (-1) day by day; naive UTC.
+    A one-off slot yields its dates instead, in the same direction."""
+    if slot.dates:
+        for d in sorted(slot.dates, reverse=step < 0):
+            yield _utc(datetime(d.year, d.month, d.day, slot.hour, slot.minute, tzinfo=ET))
+        return
     day = now.replace(tzinfo=timezone.utc).astimezone(ET).date()
     for d in range(0, 9):
         date = day + timedelta(days=d * step)
@@ -82,20 +100,22 @@ def _local_times(slot: Slot, now: datetime, step: int):
             yield _utc(datetime(date.year, date.month, date.day, slot.hour, slot.minute, tzinfo=ET))
 
 
-def next_fire(slot: Slot, now: datetime) -> datetime:
-    """The first time after now (naive UTC) that the slot runs."""
-    return next(t for t in _local_times(slot, now, 1) if t > now)
+def next_fire(slot: Slot, now: datetime) -> Optional[datetime]:
+    """The first time after now (naive UTC) that the slot runs; None for a one-off slot whose dates have passed."""
+    return next((t for t in _local_times(slot, now, 1) if t > now), None)
 
 
-def last_fire(slot: Slot, now: datetime) -> datetime:
-    """The latest time at or before now (naive UTC) that the slot was due."""
-    return next(t for t in _local_times(slot, now, -1) if t <= now)
+def last_fire(slot: Slot, now: datetime) -> Optional[datetime]:
+    """The latest time at or before now (naive UTC) that the slot was due; None for a one-off slot not yet due."""
+    return next((t for t in _local_times(slot, now, -1) if t <= now), None)
 
 
 def describe(slot: Slot) -> str:
-    """'Tue 10:00 AM ET', 'Daily 9:00 AM ET'."""
-    days = "Daily" if slot.days == EVERY_DAY else "/".join("Mon Tue Wed Thu Fri Sat Sun".split()[d] for d in slot.days)
+    """'Tue 10:00 AM ET', 'Daily 9:00 AM ET', 'Wed Nov 25 4:00 PM ET' (a one-off)."""
     t = datetime(2000, 1, 1, slot.hour, slot.minute).strftime("%I:%M %p").lstrip("0")
+    if slot.dates:
+        return ", ".join(d.strftime("%a %b ") + str(d.day) for d in sorted(slot.dates)) + f" {t} ET"
+    days = "Daily" if slot.days == EVERY_DAY else "/".join("Mon Tue Wed Thu Fri Sat Sun".split()[d] for d in slot.days)
     return f"{days} {t} ET"
 
 
@@ -327,7 +347,7 @@ def _loop(stop: threading.Event) -> None:
     now = datetime.utcnow()
     # a deploy or restart that straddled a slot: run each league's most recent one missed within the catch-up window
     missed = [(last_fire(s, now), s) for s in SLOTS]
-    missed = [(t, s) for t, s in missed if now - t < CATCH_UP and not _already_ran(s, t)]
+    missed = [(t, s) for t, s in missed if t is not None and now - t < CATCH_UP and not _already_ran(s, t)]
     for lg in LEAGUES:
         theirs = [m for m in missed if m[1].league == lg]
         if theirs:
@@ -336,8 +356,8 @@ def _loop(stop: threading.Event) -> None:
     due = {s.id: next_fire(s, now) for s in SLOTS}
     while not stop.wait(30):
         now = datetime.utcnow()
-        for s in sorted(SLOTS, key=lambda s: due[s.id]):
-            if due[s.id] <= now:
+        for s in sorted(SLOTS, key=lambda s: due[s.id] or datetime.max):
+            if due[s.id] is not None and due[s.id] <= now:
                 queues[s.league].put((s, due[s.id], "schedule"))
                 due[s.id] = next_fire(s, now)
 
@@ -362,6 +382,7 @@ def stop() -> None:
 
 
 def upcoming(now: Optional[datetime] = None, league: Optional[str] = None) -> list[tuple[datetime, Slot]]:
-    """Every slot (of one league, if given) with its next run time, soonest first."""
+    """Every slot (of one league, if given) with its next run time, soonest first; one-off slots that are done drop out."""
     now = now or datetime.utcnow()
-    return sorted(((next_fire(s, now), s) for s in SLOTS if league in (None, s.league)), key=lambda x: x[0])
+    nxt = ((next_fire(s, now), s) for s in SLOTS if league in (None, s.league))
+    return sorted(((t, s) for t, s in nxt if t is not None), key=lambda x: x[0])

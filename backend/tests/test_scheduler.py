@@ -47,6 +47,47 @@ def test_monday_and_thursday_night_games_get_a_game_day_price_pull():
     assert scheduler.next_fire(scheduler.BY_ID["mon-lines"], datetime(2026, 10, 26, 13)) == datetime(2026, 10, 26, 20)   # 4 PM EDT
 
 
+def test_week_12_holiday_games_each_get_a_game_day_price_pull_before_kickoff():
+    # Wed 8 PM GB @ LA, Thanksgiving 1 PM CHI @ DET, Black Friday 3 PM DEN @ PIT: no weekly slot pulls their lines that day
+    for slot_id, fires_utc, kickoff_utc in (("w12-wed-lines", datetime(2026, 11, 25, 21), datetime(2026, 11, 26, 1)),
+                                            ("w12-thanksgiving", datetime(2026, 11, 26, 16), datetime(2026, 11, 26, 18)),
+                                            ("w12-black-friday", datetime(2026, 11, 27, 16), datetime(2026, 11, 27, 20))):
+        slot = scheduler.BY_ID[slot_id]
+        assert slot.odds == "today"
+        assert scheduler.next_fire(slot, datetime(2026, 11, 22, 17)) == fires_utc < kickoff_utc
+    assert scheduler.describe(scheduler.BY_ID["w12-wed-lines"]) == "Wed Nov 25 4:00 PM ET"
+
+
+def test_christmas_day_games_get_a_game_day_price_pull_before_the_first_kickoff():
+    # Fri 12/25: 1 PM, 4:30 PM and 8:15 PM; Fridays have no weekly 'today' slot. December is EST (UTC-5)
+    slot = scheduler.BY_ID["w16-christmas"]
+    assert slot.odds == "today" and scheduler.describe(slot) == "Fri Dec 25 11:00 AM ET"
+    assert scheduler.next_fire(slot, datetime(2026, 11, 22)) == datetime(2026, 12, 25, 16) < datetime(2026, 12, 25, 18)
+
+
+def test_week_15_saturday_games_are_covered_by_the_weekly_saturday_slot():
+    # Sat 12/19 SEA @ PHI 5 PM and CHI @ BUF 8:20 PM: the 10 AM Saturday slot already pulls game-day lines
+    sat = scheduler.BY_ID["sat-injuries"]
+    assert sat.odds == "today" and scheduler.next_fire(sat, datetime(2026, 12, 18, 17)) == datetime(2026, 12, 19, 15)
+
+
+def test_a_one_off_slot_fires_once_then_drops_out_of_the_schedule():
+    slot = scheduler.BY_ID["w12-thanksgiving"]
+    before, at, after = datetime(2026, 11, 20), datetime(2026, 11, 26, 16), datetime(2026, 12, 1)
+    assert scheduler.last_fire(slot, before) is None and scheduler.next_fire(slot, before) == at
+    assert scheduler.last_fire(slot, at) == at and scheduler.next_fire(slot, at) is None
+    assert scheduler.next_fire(slot, after) is None and scheduler.last_fire(slot, after) == at
+    ids = lambda now: {s.id for _, s in scheduler.upcoming(now)}
+    assert "w12-thanksgiving" in ids(before) and "w12-thanksgiving" not in ids(after)
+    assert "thu-injuries" in ids(after)   # the weekly slots carry on
+    # the run log still names a past one-off run
+    with SessionLocal() as s:
+        s.add(SyncRun(slot="w12-thanksgiving", trigger="schedule", scheduled_for=at, odds_mode="today", full=False,
+                      finished_at=at, status="ok", summary="done")); s.commit()
+    with SessionLocal() as s:
+        assert main._run_out(s.query(SyncRun).one())["label"] == "Thanksgiving lines (Week 12)"
+
+
 def test_a_run_is_logged_with_its_odds_result(monkeypatch):
     monkeypatch.setattr(scheduler.pipeline, "refresh_odds", lambda mode, log=print, **kw: dict(
         games=3, fetched=2, skipped_for_credits=1, credits_before=100, credits_after=88))
@@ -128,6 +169,14 @@ def test_a_restart_marks_cut_off_runs_interrupted_and_catch_up_retries_them_once
         s.query(SyncRun).filter(SyncRun.status == "ok").update({"status": "running"}); s.commit()
     scheduler.mark_interrupted()   # cut off a second time: a third try would likely crash again
     assert scheduler._already_ran(slot, at)
+
+
+def test_the_schedule_starts_with_one_off_slots_both_past_and_not_yet_due(monkeypatch):
+    # on startup the catch-up looks back and the clock looks ahead at every slot; a one-off has nothing on one side
+    stop = scheduler.threading.Event(); stop.set()
+    for now in (datetime(2026, 11, 20), datetime(2026, 12, 15)):
+        monkeypatch.setattr(scheduler, "datetime", type("D", (datetime,), {"utcnow": staticmethod(lambda now=now: now)}))
+        scheduler._loop(stop)   # returns at once (stop is set) rather than raising StopIteration
 
 
 def test_admin_page_needs_the_owners_account(monkeypatch):
