@@ -26,7 +26,7 @@ and the ID token comes straight from Google's token endpoint, so its claims are 
   sent automatically (the Bearer admin header is not).
 - New tables are created by `Base.metadata.create_all`, so no `ensure_columns` entries are needed. Works on SQLite locally and
   on prod Postgres.
-- One replica (`railway.json`), so in-memory rate limiting, like the existing `_FAILS` for admin guesses, is enough.
+- One replica (`.railway/railway.ts`), so in-memory rate limiting, like the existing `_FAILS` for admin guesses, is enough.
 - The service worker (`frontend/pwa/`) already skips `/api/`, so auth responses are never cached.
 - **PWA catch:** on iOS an installed PWA does not share cookies with Safari. A magic link tapped in Mail opens in Safari and
   signs *Safari* in, not the home-screen app. That's why the email also carries a **6-digit code** to type into the app.

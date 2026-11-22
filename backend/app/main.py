@@ -200,7 +200,6 @@ _jobs = scheduler._jobs
 
 def _release_memory():
     """Hand a finished job's memory back to the OS and drop caches the new data outdates."""
-    import gc
     _injury_report.cache_clear()
     _next_week_schedule.cache_clear()
     _stats.cache_clear()   # game logs in the player drawer come from the stats files, which a sync just refreshed
@@ -210,13 +209,20 @@ def _release_memory():
     _endzone_cache.clear()
     market_fit.clear_cache()
     nba_routes.clear_caches()
+    _trim()
+    _warm_now.set()
+
+
+def _trim():
+    """Collect garbage and give free heap pages back to the OS. Freed memory otherwise stays in the process (and on the
+    host's memory bill) until a restart: Railway charges for what the container holds, not what Python is using."""
+    import gc
     gc.collect()
     try:
         import ctypes
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except (OSError, AttributeError):
         pass  # not glibc (e.g. macOS): nothing to trim
-    _warm_now.set()
 
 
 # ---------- warm caches ----------
@@ -242,6 +248,7 @@ def warm_caches() -> None:
     except Exception as e:   # a request builds it instead
         print(f"Couldn't warm the NFL caches: {e}")
     nba_routes.warm_caches()
+    _trim()   # rebuilding the lines and pricing peaks well above what the caches keep: hand the difference back
     print(f"Warmed the board caches in {time.time() - t:.1f}s")
 
 
