@@ -1,7 +1,7 @@
 """Reading a bet slip from its text (My bets → Add a bet → Upload a screenshot, when Claude isn't set up): the browser reads
 the screenshot with OCR (Tesseract.js, on the bettor's device) and sends only the text here. Each sportsbook lays its slip
 out differently, so each has its own rules; the result has bet_screens.SCHEMA's shape, and bet_screens.to_draft matches it
-to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel and DraftKings.
+to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel, DraftKings and Fanatics.
 """
 import re
 from typing import Optional
@@ -184,6 +184,33 @@ def _draftkings(lines: list[str]) -> list[dict]:
     return out
 
 
+# Fanatics: "Tetairoa McMillan 50+ -230" (the price on the line, or with Apple's reader at the slip's end), then the market
+FAN_LEG = re.compile(r"^\W{0,3}(?P<name>[A-Z][A-Za-z.'\- ]+?)\s+(?P<need>\d+(?:\.\d)?\+|(?:Over|Under|O|U)\s?\d+\.\d)"
+                     r"(?:\s+(?P<odds>[+-]\d{3,5}))?\s*$")
+
+
+def _fanatics(lines: list[str]) -> list[dict]:
+    """Fanatics: the player and what he needs ("Tetairoa McMillan 50+"), his price beside it, then the market on the next
+    line ("Receiving Yards", a check mark before it read as "o") and the game under that. Apple's reader lists the legs'
+    prices on their own lines at the end instead: they're matched to the legs in order when there's one for each."""
+    out = []
+    for ln, nxt in zip(lines, lines[1:]):
+        m = FAN_LEG.match(ln)
+        market = re.sub(r"^\W*(?:[a-z]\s+)?", "", nxt)
+        if not m or not _label(market):
+            continue
+        name = _name(m.group("name"))
+        leg = _leg(name, market, f"{name} {m.group('need')} {market}")
+        leg["odds"] = int(m.group("odds")) if m.group("odds") else None
+        out.append(leg)
+    if out and all(leg["odds"] is None for leg in out):
+        alone = [int(x.strip()) for x in lines if ODDS.fullmatch(x.strip())]
+        if len(alone) == len(out):
+            for leg, o in zip(out, alone):
+                leg["odds"] = o
+    return out
+
+
 def _moneylines(lines: list[str]) -> list[dict]:
     """bet365 moneylines: "LA Lakers -575" over "Money Line" (Apple's reader may put the price on a line of its own)."""
     out = []
@@ -215,16 +242,28 @@ def parse(text: str) -> dict:
     legs = fd if len(fd) >= len(b365) else b365
     if dk and ("draftkings" in low or len(dk) > len(legs)):
         legs = dk
+    fan = _fanatics(lines)
+    fanatics = bool(re.search(r"fan\w{0,2}tics", low))   # Apple's reader has made the logo "Fantics"
+    if fan and (fanatics or len(fan) > len(legs)):
+        legs = fan
     book = "bet365" if "bet365" in low or (legs is b365 and legs) else "FanDuel" if "fanduel" in low or (legs is fd and legs) else None
     for b in ("DraftKings", "BetMGM", "Caesars", "ESPN BET", "Fanatics", "Hard Rock", "BetRivers"):
         if b.lower() in low:
             book = b
+    if fanatics:
+        book = "Fanatics"
     # the bet's price: beside "Parlay" / "Single" or on the line after it (Apple's reader splits "SAME GAME PARLAY" / "+1300")
     head = next((ln if ODDS.search(ln) else nxt for ln, nxt in zip(lines, lines[1:] + [""])
                  if re.search(r"(?i)parlay|single|straight", ln) and not re.search(r"(?i)boost", ln)
                  and (ODDS.search(ln) or ODDS.fullmatch(nxt.strip()))), None)
+    if head is None:
+        # Fanatics: beside the leg count ("3 Leg  +204"), or on a line with only a boost's lightning bolt before it
+        head = next((ln for ln in lines if re.search(r"(?i)\b\d+\s?legs?\b", ln) and ODDS.search(ln)), None) \
+            or next((ln for ln in lines if re.fullmatch(r"\S{1,2}\s+[+-]\d{3,5}", ln)), None)
     odds_m = ODDS.search(head) if head else ODDS.search(text) if not any(leg["odds"] for leg in legs) else None
     stake = bonus = to_return = None
+    paid: list = []   # the payout's amounts: two when a boost is shown as the old payout struck through, then the new
+    money = lambda xs: [float(x.replace(",", "")) for x in xs]   # noqa: E731
     for i, ln in enumerate(lines):
         if re.search(r"(?i)\b(wager|stake|bet amount)\b", ln):
             here = MONEY.findall(ln)
@@ -232,14 +271,16 @@ def parse(text: str) -> dict:
             if amounts:
                 stake = float(amounts[0].replace(",", ""))
                 if len(amounts) > 1 and re.search(r"(?i)return|payout|to win|paid", ln):
-                    to_return = float(amounts[1].replace(",", ""))
+                    paid = money(amounts[1:3])
+                    to_return = paid[0]
             break
     # the payout on its own line, its amount beside it or on the next line (Apple's reader splits "Net Return" / "$110.82")
     for i, ln in enumerate(lines):
         if to_return is None and re.fullmatch(r"(?i)\W*(net return|(total )?to return|returns?|payout|potential payout|to win|to pay)\W*(\$.*)?", ln):
             amounts = MONEY.findall(ln) or (MONEY.findall(lines[i + 1]) if i + 1 < len(lines) else [])
             if amounts:
-                to_return = float(amounts[0].replace(",", ""))
+                paid = money(amounts[:2])
+                to_return = paid[0]
     m = re.search(r"\$\s?(\d[\d,]*\.\d{2})\s*(bonus|free) bet", text, re.I)
     if m:
         bonus = float(m.group(1).replace(",", ""))
@@ -255,6 +296,14 @@ def parse(text: str) -> dict:
         odds = _american(to_return / stake)   # no price shown (a boosted parlay of priced legs): what it pays says it
         from_return = True
     boost = re.search(r"(\d+(?:\.\d+)?)\s?%[\s|]*(?:parlay |profit |odds )?boost", text, re.I)
-    return {"boost": float(boost.group(1)) if boost else None, "odds_from_return": from_return, "no_sweat": False,
+    boost_pct = float(boost.group(1)) if boost else None
+    if stake and len(paid) == 2 and paid[1] > paid[0] > stake:
+        # a boosted payout, the old one struck through ("$48.53 $54.64"): it returns the new one, the price before the boost
+        # is what the old one says, and the boost is how much more profit the new one pays
+        pct = round(((paid[1] - stake) / (paid[0] - stake) - 1) * 100)
+        if 1 <= pct <= 500:
+            to_return, odds, from_return = paid[1], _american(paid[0] / stake), False
+            boost_pct = boost_pct or float(pct)
+    return {"boost": boost_pct, "odds_from_return": from_return, "no_sweat": False,
             "sportsbook": book, "bet_type": "parlay" if len(legs) > 1 else "single", "odds": odds,
             "stake": stake, "bonus_stake": bonus, "to_return": to_return, "event": {"teams": teams, "starts": None}, "legs": legs}

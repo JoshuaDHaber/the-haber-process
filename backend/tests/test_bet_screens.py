@@ -231,7 +231,7 @@ def test_the_text_endpoint_matches_legs_to_the_board(sent):
         assert [l["graded"] for l in d["legs"]] == [False, False] + [True] * 8
         assert any("stake" in n for n in d["notes"])
         empty = c.post("/api/me/bets/read-slip-text", json={"text": "a photo of a dog"}).json()
-        assert empty["legs"] == [] and "bet365, FanDuel and DraftKings" in empty["notes"][0]
+        assert empty["legs"] == [] and "bet365, FanDuel, DraftKings and Fanatics" in empty["notes"][0]
         assert c.post("/api/me/bets/read-slip-text", json={"text": "x" * 20001}).status_code == 422
     with TestClient(main.app, client=("198.51.100.33", 5000)) as anon:
         assert anon.post("/api/me/bets/read-slip-text", json={"text": slip("bet365")}).status_code == 401
@@ -286,6 +286,24 @@ def test_the_draftkings_text_reads_every_leg_through_the_icons_noise(reader):
         ("Coby White", "pa", "Over", 19.5),   # Tesseract reads the headshot as "a4," before the name
         ("Quentin Grimes", "pts", "Over", 11.5), ("Matisse Thybulle", "stl", "Over", 1.5)]
     assert s["legs"][3]["text"] == "Coby White 20+ Points + Assists"
+
+
+@pytest.mark.parametrize("reader", ["", "-apple"])
+def test_the_fanatics_text_reads_each_leg_and_the_boost_from_the_struck_through_payout(reader):
+    """Fanatics shows a boost as the old payout struck through beside the new one ($48.53 $54.64 on $17.96): the price
+    before the boost is what the old one pays (+170), and the new one pays 20% more profit. Apple's reader puts each
+    leg's price at the slip's end and reads the logo as "Fantics"."""
+    s = slip_text.parse(slip("fanatics" + reader))
+    assert (s["sportsbook"], s["bet_type"], s["stake"], s["to_return"]) == ("Fanatics", "parlay", 17.96, 54.64)
+    assert (s["odds"], s["boost"], s["odds_from_return"]) == (170, 20.0, False)
+    assert [(l["player"], l["kind"], l["side"], l["line"], l["odds"]) for l in s["legs"]] == [
+        ("Tetairoa McMillan", "rec", "Over", 49.5, -230), ("George Pickens", "rec", "Over", 49.5, -320), ("Garrett Wilson", "rec", "Over", 49.5, -230)]
+    assert s["legs"][0]["text"] == "Tetairoa McMillan 50+ Receiving Yards"
+
+
+def test_a_payout_without_a_boost_is_left_alone():
+    s = slip_text.parse("Fanatics Sportsbook\nSingle +150\nWager\n$10.00\nPayout\n$25.00\nJosh Allen 250+ -110\nPassing Yards\n")
+    assert (s["odds"], s["boost"], s["to_return"]) == (150, None, 25.0)
 
 
 def test_a_draftkings_main_line_and_a_market_the_site_doesnt_project():

@@ -207,7 +207,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
             <IconPhoto size={16} stroke={1.75} aria-hidden />{reading ? "Reading the slip…" : "Upload a screenshot"}
           </button>
           <span className="mut">{claude ? "Fills in the bet from your slip for you to check. The image isn't kept."
-            : "Fills in the bet from a bet365, FanDuel or DraftKings slip for you to check. The image stays on your device."}</span>
+            : "Fills in the bet from a bet365, FanDuel, DraftKings or Fanatics slip for you to check. The image stays on your device."}</span>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />
           <form className="add-link" onSubmit={(e) => { e.preventDefault(); if (linkOk) upload(link); }}>
             <label className="sr-only" htmlFor="add-link">FanDuel share link</label>
