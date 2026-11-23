@@ -3,7 +3,7 @@
 // always correct. API calls are never cached: stale odds are worse than an error.
 const CACHE = "props-v2";
 // A bet slip shared from a sportsbook app (Android's share menu, via the manifest's share_target): a screenshot, or the
-// text and link a share button sends (FanDuel's "Check out my bet" link). Held here until My bets opens it in Add a bet
+// text and link a share button sends (FanDuel's "Check out my bet" link, a DraftKings Social post). Held here until My bets opens it in Add a bet
 // (frontend bets.takeSharedSlip)
 const SHARED = "shared-slip";
 

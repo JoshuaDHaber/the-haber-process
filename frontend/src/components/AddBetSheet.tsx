@@ -3,7 +3,7 @@ import { IconPhoto, IconPlus, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
-import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
+import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, dkPost, readDkLinkOnDevice, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
   type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
 import { isYesNo, KIND_LABEL, namesItself, americanOdds, playLabel } from "../format";
 import { toAmerican, toDecimal, toWin } from "../slip";
@@ -32,10 +32,14 @@ const legsPrice = (legs: ManualLeg[]) =>
 const COUNTS = new Set<string>(["threes", "stl", "blk", "recs", "ptd"]);
 const when = (iso: string) => new Date(iso + "Z").toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+// a share link the server can read (backend share_links): FanDuel's betslip link, or the DraftKings Social post its share button makes
+const SHARE_LINK = /fanduel\.com\/addToBetslip\?\S*(shareCode|marketId)|draftkings\.com\/(?:[a-z]{2}\/)?social\/post\/[0-9a-f-]{36}|dksb:\/\/sb\/social(?:web)?\/post\//i;
+
 /** My bets → "Add a bet": record a bet placed outside the app. Before its game starts is the rule; one the bettor forgot can
  *  still be added up to LATE_DAYS after, and is marked late on My bets (the result may have been known).
  *  A player prop picked from a search is graded from the box scores like a tracked one; anything else (a spread, a total,
  *  another sport, a boost) is described in words and marked by hand. */
+
 export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { onClose: () => void; defaultLeague: "nfl" | "nba"; sharedSlip?: File | string }) {
   const auth = useAuth();
   const qc = useQueryClient();
@@ -53,9 +57,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const file = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
-  // a FanDuel share link pasted in: read like shared slip text (the server spots the link: backend share_links)
+  // a FanDuel or DraftKings share link pasted in: read like shared slip text (the server spots the link: backend share_links)
   const [link, setLink] = useState("");
-  const linkOk = /fanduel\.com\/addToBetslip\?\S*(shareCode|marketId)/i.test(link);
+  const linkOk = SHARE_LINK.test(link);
 
   // a player prop: search, then market, side, line and the price taken; legs collect into a single or a parlay
   const [q, setQ] = useState("");
@@ -175,7 +179,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const upload = async (f: File | string | undefined) => {
     if (!f) return;
     setReading(true); setProblem(""); setNotes([]);
-    try { apply(typeof f === "string" ? await readSlipText(f) : claude ? await readScreenshot(await screenshotDataUrl(f)) : await readSlipOnDevice(f)); }
+    // a DraftKings link without Claude: its preview picture is read here with OCR, like a screenshot
+    const post = typeof f === "string" && !claude ? dkPost(f) : null;
+    try { apply(post ? await readDkLinkOnDevice(post) : typeof f === "string" ? await readSlipText(f) : claude ? await readScreenshot(await screenshotDataUrl(f)) : await readSlipOnDevice(f)); }
     catch (err) { setProblem((err as Error).message); }
     finally { setReading(false); if (file.current) file.current.value = ""; }
   };
@@ -210,16 +216,16 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
             : "Fills in the bet from a bet365, FanDuel, DraftKings or Fanatics slip for you to check. The image stays on your device."}</span>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files?.[0])} />
           <form className="add-link" onSubmit={(e) => { e.preventDefault(); if (linkOk) upload(link); }}>
-            <label className="sr-only" htmlFor="add-link">FanDuel share link</label>
-            <input id="add-link" className="auth-input" value={link} placeholder="Or paste a FanDuel share link" autoComplete="off" inputMode="url"
+            <label className="sr-only" htmlFor="add-link">FanDuel or DraftKings share link</label>
+            <input id="add-link" className="auth-input" value={link} placeholder="Or paste a FanDuel or DraftKings share link" autoComplete="off" inputMode="url"
               aria-invalid={!!link.trim() && !linkOk} aria-describedby={link.trim() && !linkOk ? "add-link-err" : undefined}
               onChange={(e) => setLink(e.target.value)}
-              onPaste={(e) => { const t = e.clipboardData.getData("text"); if (/fanduel\.com\/addToBetslip/i.test(t)) { e.preventDefault(); setLink(t.trim()); upload(t); } }} />
+              onPaste={(e) => { const t = e.clipboardData.getData("text"); if (SHARE_LINK.test(t)) { e.preventDefault(); setLink(t.trim()); upload(t); } }} />
             <button type="submit" className="primary outline" disabled={reading || !linkOk}>Read link</button>
           </form>
-          {link.trim() && !linkOk && <span id="add-link-err" className="err add-link-err">That isn't a FanDuel share link. It looks like sportsbook.fanduel.com/addToBetslip?shareCode=…</span>}
+          {link.trim() && !linkOk && <span id="add-link-err" className="err add-link-err">That isn't a FanDuel or DraftKings share link. They look like sportsbook.fanduel.com/addToBetslip?shareCode=… or sportsbook.draftkings.com/social/post/…</span>}
           {IOS && <span className="mut add-shortcut">On iPhone or iPad, <a href={SHORTCUT} target="_blank" rel="noopener noreferrer">add the Shortcut</a> to share a slip here
-            straight from your sportsbook app: a screenshot, or FanDuel's share link.</span>}
+            straight from your sportsbook app: a screenshot, or a FanDuel or DraftKings share link.</span>}
         </div>
       )}
       {notes.length > 0 && (

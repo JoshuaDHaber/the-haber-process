@@ -1,7 +1,7 @@
 """Reading a bet slip from its text (My bets → Add a bet → Upload a screenshot, when Claude isn't set up): the browser reads
 the screenshot with OCR (Tesseract.js, on the bettor's device) and sends only the text here. Each sportsbook lays its slip
 out differently, so each has its own rules; the result has bet_screens.SCHEMA's shape, and bet_screens.to_draft matches it
-to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel, DraftKings and Fanatics.
+to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel, DraftKings (its bet slip and its bet card) and Fanatics.
 """
 import re
 from typing import Optional
@@ -184,6 +184,50 @@ def _draftkings(lines: list[str]) -> list[dict]:
     return out
 
 
+# DraftKings' bet card (My Bets, and what a DraftKings share link shows): a header "4 Pick Parlay | +2800", every leg's
+# player on the next line ("Ja'Marr Chase, Mike Gesicki, Tee Higgins, Stefon Diggs"), "Wager: $4.00 | To Pay: $112.00",
+# then each leg as the player (after a jersey icon OCR reads as noise: "0 "1 " Lf Chase") over its market ("Anytime TD
+# Scorer"). The header's list spells each name cleanly, so a leg is matched to it by surname.
+DK_CARD = re.compile(r"(?i)\b(\d{1,2}) pick (?:sgp )?parlay\b")
+DK_LABEL = re.compile(DK_MARKETS.pattern + r"\s*(?P<need>\d+(?:\.\d)?\+|(?:over|under|o|u)\s?\d+\.\d)?\s*$")
+NAME = re.compile(r"[A-Z][A-Za-z.'\-]+(?: [A-Z][A-Za-z.'\-]+){1,3}")
+
+
+def _dk_card(lines: list[str]) -> list[dict]:
+    """DraftKings' bet card. A leg the picture doesn't show (a share link's preview stops after the first) comes back as just
+    its player's name, kind "other", for the bettor to finish."""
+    head = next((i for i, ln in enumerate(lines) if DK_CARD.search(ln)), None)
+    if head is None:
+        return []
+    count = int(DK_CARD.search(lines[head]).group(1))
+    names = []
+    for ln in lines[head + 1:head + 4]:   # the list of legs' players: a line of names split by commas
+        parts = [p.strip(" .") for p in ln.replace("’", "'").split(",")]
+        if len(parts) >= 2 and sum(bool(NAME.fullmatch(p)) for p in parts) >= len(parts) - 1:
+            names = [_name(p) for p in parts]
+            break
+    shown = {}
+    for prev, ln in zip(lines[head:], lines[head + 1:]):
+        m = DK_LABEL.match(re.sub(r"^(?:(?:[^\w\s]|\b\w\b)+\s*)+", "", ln))   # after the leg's status circle ("O !")
+        if not m:
+            continue
+        clean = prev.replace("’", "'")
+        # the player: whichever listed name's surname is on the line above, else the capitalised words at its end
+        who = next((n for n in names if n.split()[-1].lower() in clean.lower()), None)
+        if who is None:
+            tail = NAME.findall(clean)
+            who = _name(tail[-1]) if tail else None
+        if not who or who in shown:
+            continue
+        label = re.sub(r"\s+", " ", m.group(1))
+        need = (m.group("need") or "") or (DK_NEED.search(clean).group(0) if DK_NEED.search(clean) else "")
+        shown[who] = _leg(who, label, " ".join(f"{who} {need} {label}".split()))
+    order = names or list(shown)
+    legs = [shown.get(n) or {"player": n, "kind": "other", "side": "Over", "line": None, "odds": None, "text": n} for n in order]
+    legs += [leg for n, leg in shown.items() if n not in order]
+    return legs if shown or len(names) == count else []
+
+
 # Fanatics: "Tetairoa McMillan 50+ -230" (the price on the line, or with Apple's reader at the slip's end), then the market
 FAN_LEG = re.compile(r"^\W{0,3}(?P<name>[A-Z][A-Za-z.'\- ]+?)\s+(?P<need>\d+(?:\.\d)?\+|(?:Over|Under|O|U)\s?\d+\.\d)"
                      r"(?:\s+(?P<odds>[+-]\d{3,5}))?\s*$")
@@ -242,6 +286,9 @@ def parse(text: str) -> dict:
     legs = fd if len(fd) >= len(b365) else b365
     if dk and ("draftkings" in low or len(dk) > len(legs)):
         legs = dk
+    card = _dk_card(lines)
+    if card and len(card) >= len(legs):
+        legs = card
     fan = _fanatics(lines)
     fanatics = bool(re.search(r"fan\w{0,2}tics", low))   # Apple's reader has made the logo "Fantics"
     if fan and (fanatics or len(fan) > len(legs)):
@@ -252,6 +299,8 @@ def parse(text: str) -> dict:
             book = b
     if fanatics:
         book = "Fanatics"
+    if card and legs is card:
+        book = "DraftKings"   # its card never names the book
     # the bet's price: beside "Parlay" / "Single" or on the line after it (Apple's reader splits "SAME GAME PARLAY" / "+1300")
     head = next((ln if ODDS.search(ln) else nxt for ln, nxt in zip(lines, lines[1:] + [""])
                  if re.search(r"(?i)parlay|single|straight", ln) and not re.search(r"(?i)boost", ln)
@@ -270,7 +319,7 @@ def parse(text: str) -> dict:
             amounts = here or (MONEY.findall(lines[i + 1]) if i + 1 < len(lines) else [])
             if amounts:
                 stake = float(amounts[0].replace(",", ""))
-                if len(amounts) > 1 and re.search(r"(?i)return|payout|to win|paid", ln):
+                if len(amounts) > 1 and re.search(r"(?i)return|payout|to win|to pay|paid", ln):
                     paid = money(amounts[1:3])
                     to_return = paid[0]
             break

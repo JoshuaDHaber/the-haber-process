@@ -249,12 +249,43 @@ export const readSlipText = (text: string) =>
   call<ScreenDraft>("bets/read-slip-text", { method: "POST", body: JSON.stringify({ text: text.slice(0, 20000) }) });
 /** The free way, when Claude isn't set up: OCR reads the screenshot on this device (Tesseract.js, loaded only when needed),
  * and only its text goes to the server, which knows bet365's, FanDuel's, DraftKings' and Fanatics' layouts (backend slip_text). */
-export async function readSlipOnDevice(file: File): Promise<ScreenDraft> {
+export async function readSlipOnDevice(file: Blob): Promise<ScreenDraft> {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
   let text: string;
   try { text = (await worker.recognize(file)).data.text; } finally { await worker.terminate(); }
   return readSlipText(text);
+}
+/** A DraftKings share link's post id (a DraftKings Social post: backend share_links.find_dk_post), or null. */
+export const dkPost = (text: string) =>
+  text.match(/(?:draftkings\.com\/(?:[a-z]{2}\/)?social|dksb:\/\/sb\/social(?:web)?)\/post\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1].toLowerCase() ?? null;
+/** A DraftKings share link read on this device, when Claude isn't set up: the server fetches the post's preview image (its
+ * small link-preview picture of the slip), and OCR reads it here at three times the size, which it needs for text that small. */
+export async function readDkLinkOnDevice(post: string): Promise<ScreenDraft> {
+  const res = await fetch(`/api/me/bets/dk-preview/${post}`, { credentials: "same-origin", headers: { "X-Requested-With": "fetch" } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't open that DraftKings link. Upload a screenshot of the slip instead.");
+  }
+  const img = await createImageBitmap(await res.blob());
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width * 3; canvas.height = img.height * 3;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = "#262626";   // the card's own dark grey, under its transparent corners
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // light and grey text on a dark card, as dark text on white, stretched to full contrast: Tesseract misses the grey otherwise
+  const px = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = px.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const v = Math.max(0, Math.min(255, 255 - (lum - 40) * (255 / 140)));
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  ctx.putImageData(px, 0, 0);
+  const big = await new Promise<Blob>((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read that DraftKings link."))), "image/png"));
+  return readSlipOnDevice(big);
 }
 
 /** A screenshot as a data URL the server accepts: under 5 MB, re-encoded as JPEG (scaled down if need be) when it's bigger. */
