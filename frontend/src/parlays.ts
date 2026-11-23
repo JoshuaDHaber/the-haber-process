@@ -1,7 +1,6 @@
 import type { Kind, Ladder, Pick } from "./api";
 import { jointProb, legRho, parlayProb, type CorrTable } from "./copula";
 import { isYesNo } from "./format";
-import { matchupGrade } from "./components/MatchupGrade";
 import { getLeague } from "./league";
 import { legId, linkStatus, toAmerican, toDecimal, type Leg } from "./slip";
 
@@ -366,44 +365,35 @@ export function buildBalancedLadders(entries: LadderEntry[], book: string, gameI
   return out;
 }
 
-// ---------- soft-matchup parlays: 4-6 longer-priced overs, every player facing a defense that gives up a lot to his position ----------
-/** The markets soft-matchup parlays are built from: the graded yardage and box-score markets with alternate lines. Passing
- *  yards is the one NFL market where the grade has hinted at anything (engine/dvp.py). */
-export const softKinds = (): Kind[] => (getLeague() === "nba" ? ["pts", "reb", "ast", "pra", "pr", "pa"] : ["rush", "rec", "rr", "pass"]);
-/** Matchup grades a leg needs (MatchupGrade.tsx: A is the softest fifth of defenses against his position). */
-export const SOFT_GRADES = "AB";
-/** Grades let in when too few players have one of SOFT_GRADES and a usable rung: anything but a tough matchup. */
-export const SOFT_FALLBACK_GRADES = "ABC";
-/** Fewest players with a usable rung before the search widens to SOFT_FALLBACK_GRADES. */
-export const SOFT_MIN_PLAYERS = 6;
+// ---------- starter parlays: 4-6 longer-priced overs from the players with the biggest roles ----------
+/** The markets starter parlays are built from: the yardage and box-score markets with alternate lines. */
+export const starterKinds = (): Kind[] => (getLeague() === "nba" ? ["pts", "reb", "ast", "pra", "pr", "pa"] : ["rush", "rec", "rr", "pass"]);
 /** Shortest price on a leg: these parlays are for payout, so heavy chalk is left to the ladders. */
-export const SOFT_MIN_ODDS = -200;
+export const STARTER_MIN_ODDS = -200;
 /** Lowest chance a leg needs: a coin flip, so plus-money rungs can join. */
-export const SOFT_MIN_PROB = 0.5;
-/** Players whose ladders are pulled (preferred grades first, then the fallback's), and the most a tile's search looks at. */
-export const SOFT_TARGETS = 16;
-export const SOFT_SEARCH_PLAYERS = 12;
-export const SOFT_PER_TEAM = 4;
+export const STARTER_MIN_PROB = 0.5;
+/** Players whose ladders are pulled, biggest role first, and the most a tile's search looks at. */
+export const STARTER_TARGETS = 16;
+export const STARTER_SEARCH_PLAYERS = 12;
+export const STARTER_PER_TEAM = 4;
 /** Rungs kept per player, spread across his lines, so a 6-leg search stays quick. */
-export const SOFT_RUNGS_PER_PLAYER = 3;
+export const STARTER_RUNGS_PER_PLAYER = 3;
 /** One tile per leg count, each capped in price (decimal odds) so a long rung can't turn it into a lottery ticket. At
- *  SOFT_MIN_ODDS or longer, 4 legs start near +400, 5 near +660 and 6 near +1040. */
-export const SOFT_BANDS = [
-  { key: "soft-4", title: "Soft matchups 4-leg", legs: 4, lo: 1, hi: 11.0001 },   // up to +1000
-  { key: "soft-5", title: "Soft matchups 5-leg", legs: 5, lo: 1, hi: 21.0001 },   // up to +2000
-  { key: "soft-6", title: "Soft matchups 6-leg", legs: 6, lo: 1, hi: 36.0001 },   // up to +3500
+ *  STARTER_MIN_ODDS or longer, 4 legs start near +400, 5 near +660 and 6 near +1040. */
+export const STARTER_BANDS = [
+  { key: "starters-4", title: "Starters 4-leg", legs: 4, lo: 1, hi: 11.0001 },   // up to +1000
+  { key: "starters-5", title: "Starters 5-leg", legs: 5, lo: 1, hi: 21.0001 },   // up to +2000
+  { key: "starters-6", title: "Starters 6-leg", legs: 6, lo: 1, hi: 36.0001 },   // up to +3500
 ];
-export const SOFT_MIN_LEGS = SOFT_BANDS[0].legs;
-export const SOFT_MAX_LEGS = SOFT_BANDS[SOFT_BANDS.length - 1].legs;
-
-const gradeOf = (p: Pick) => (p.dvp_rank != null && p.dvp_n ? matchupGrade(p.dvp_rank, p.dvp_n) : null);
-const gradedIn = (grades: string) => (p: Pick) => { const g = gradeOf(p); return g != null && grades.includes(g); };
+export const STARTER_MIN_LEGS = STARTER_BANDS[0].legs;
+export const STARTER_MAX_LEGS = STARTER_BANDS[STARTER_BANDS.length - 1].legs;
 
 /** How big a player's role is in each market: where his projection ranks among the slate's overs in that market, 0 (the
  *  smallest) to 1 (the biggest). A percentile, not a ratio, so markets compare: every starting QB's passing yards dwarf a
  *  receiver's, and a center's rebounds a guard's. Ranking by chance instead fills the tiles with bench players' 2.5s, which
- *  are likely because they're small. */
-export function roleScores(picks: Pick[], kinds: Kind[] = softKinds()): Map<string, number> {
+ *  are likely because they're small; in the backtest (backend/app/starter_backtest.py) legs from the biggest roles hit
+ *  more often against their price, and the matchup grade, which this once filtered on, sorted nothing. */
+export function roleScores(picks: Pick[], kinds: Kind[] = starterKinds()): Map<string, number> {
   const out = new Map<string, number>();
   for (const k of kinds) {
     const mus = new Map<string, number>();
@@ -414,71 +404,55 @@ export function roleScores(picks: Pick[], kinds: Kind[] = softKinds()): Map<stri
   return out;
 }
 
-/** The players to pull ladders for: those with a soft-matchup over graded in SOFT_GRADES, biggest role first (roleScores),
- *  then (to widen to if those run short) the rest of SOFT_FALLBACK_GRADES the same way. Each player in the market where his
- *  role is biggest; at most SOFT_PER_TEAM per team. Flagged plays are left out. */
-export function softTargets(picks: Pick[], n = SOFT_TARGETS): Pick[] {
-  const kinds = softKinds();
+/** The players to pull ladders for, biggest role first (roleScores), each in the market where his role is biggest, at most
+ *  STARTER_PER_TEAM per team. Flagged plays are left out. */
+export function starterTargets(picks: Pick[], n = STARTER_TARGETS): Pick[] {
+  const kinds = starterKinds();
   const role = roleScores(picks, kinds);
   const score = (p: Pick) => role.get(`${p.player_id}|${p.kind}`) ?? 0;
-  const pickFrom = (pool: Pick[], max: number, taken: Set<string>, teams: Map<string, number>) => {
-    const best = new Map<string, Pick>();
-    for (const p of pool) {
-      if (taken.has(p.player_id)) continue;
-      const cur = best.get(p.player_id);
-      if (!cur || score(p) > score(cur) || (score(p) === score(cur) && p.prob > cur.prob)) best.set(p.player_id, p);
-    }
-    const out: Pick[] = [];
-    for (const p of [...best.values()].sort((a, b) => score(b) - score(a) || b.prob - a.prob)) {
-      const team = `${p.game_id}|${p.team}`;
-      if ((teams.get(team) ?? 0) >= SOFT_PER_TEAM) continue;
-      teams.set(team, (teams.get(team) ?? 0) + 1);
-      taken.add(p.player_id);
-      out.push(p);
-      if (out.length >= max) break;
-    }
-    return out;
-  };
-  const eligible = picks.filter((p) => p.side === "Over" && kinds.includes(p.kind) && !p.flagged);
-  const taken = new Set<string>(), teams = new Map<string, number>();
-  const soft = pickFrom(eligible.filter(gradedIn(SOFT_GRADES)), n, taken, teams);
-  if (soft.length >= n) return soft;
-  return [...soft, ...pickFrom(eligible.filter((p) => gradedIn(SOFT_FALLBACK_GRADES)(p) && !gradedIn(SOFT_GRADES)(p)), n - soft.length, taken, teams)];
+  const best = new Map<string, Pick>();
+  for (const p of picks) {
+    if (p.side !== "Over" || !kinds.includes(p.kind) || p.flagged) continue;
+    const cur = best.get(p.player_id);
+    if (!cur || score(p) > score(cur) || (score(p) === score(cur) && p.prob > cur.prob)) best.set(p.player_id, p);
+  }
+  const teams = new Map<string, number>();
+  const out: Pick[] = [];
+  for (const p of [...best.values()].sort((a, b) => score(b) - score(a) || b.prob - a.prob)) {
+    const team = `${p.game_id}|${p.team}`;
+    if ((teams.get(team) ?? 0) >= STARTER_PER_TEAM) continue;
+    teams.set(team, (teams.get(team) ?? 0) + 1);
+    out.push(p);
+    if (out.length >= n) break;
+  }
+  return out;
 }
 
 /** At most `n` of a player's rungs, evenly spread from his shortest line to his longest. */
-export function spreadRungs(rungs: ParlayLeg[], n = SOFT_RUNGS_PER_PLAYER): ParlayLeg[] {
+export function spreadRungs(rungs: ParlayLeg[], n = STARTER_RUNGS_PER_PLAYER): ParlayLeg[] {
   if (rungs.length <= n) return rungs;
   if (n <= 1) return rungs.slice(0, n);
   return [...new Set(Array.from({ length: n }, (_, i) => Math.round((i * (rungs.length - 1)) / (n - 1))))].map((i) => rungs[i]);
 }
 
-/** Soft-matchup parlays at one book: for each SOFT_BANDS leg count, the likeliest combination of that many different players'
- *  overs under its price cap, each leg at SOFT_MIN_ODDS or longer and facing a defense graded in SOFT_GRADES (widened to
- *  SOFT_FALLBACK_GRADES when fewer than SOFT_MIN_PLAYERS have a usable rung). Tiles share at most MAX_SHARED_PLAYERS players
- *  with each other and with `avoid` where the pool allows, else repeat the likeliest. */
-export function buildSoftMatchupParlays(entries: LadderEntry[], book: string, corr?: CorrTable, avoid: Parlay[] = []): Parlay[] {
-  const withRungs = entries.map((e) => ({ base: e.base, rungs: spreadRungs(ladderRungs(e.base, e.ladder, book, SOFT_MIN_ODDS, SOFT_MIN_PROB)) }))
-    .filter((e) => e.rungs.length);
-  const soft = withRungs.filter((e) => gradedIn(SOFT_GRADES)(e.base));
-  const widened = soft.length < SOFT_MIN_PLAYERS;
-  // entries come biggest role first (softTargets), so the search looks at the starters, not the likeliest small lines
-  const pool = (widened ? withRungs : soft).slice(0, SOFT_SEARCH_PLAYERS);
-  if (pool.length < SOFT_MIN_LEGS) return [];
-  const players = pool.map((e) => e.rungs);
+/** Starter parlays at one book: for each STARTER_BANDS leg count, the likeliest combination of that many different players'
+ *  overs under its price cap, each leg at STARTER_MIN_ODDS or longer, from the STARTER_SEARCH_PLAYERS biggest roles with a
+ *  usable rung (`entries` come biggest role first, as starterTargets orders them). Tiles share at most MAX_SHARED_PLAYERS
+ *  players with each other and with `avoid` where the pool allows, else repeat the likeliest. */
+export function buildStarterParlays(entries: LadderEntry[], book: string, corr?: CorrTable, avoid: Parlay[] = []): Parlay[] {
+  const pool = entries.map((e) => spreadRungs(ladderRungs(e.base, e.ladder, book, STARTER_MIN_ODDS, STARTER_MIN_PROB)))
+    .filter((r) => r.length).slice(0, STARTER_SEARCH_PLAYERS);
+  if (pool.length < STARTER_MIN_LEGS) return [];
   const chosen: Pick[][] = avoid.map((p) => p.legs);
-  const best = SOFT_BANDS.map((band) => {
-    const [legs] = searchLadders(players, [band], (ls) => ls.length === band.legs, corr, band.legs, chosen);
+  const best = STARTER_BANDS.map((band) => {
+    const [legs] = searchLadders(pool, [band], (ls) => ls.length === band.legs, corr, band.legs, chosen);
     if (legs) chosen.push(legs);
     return legs;
   });
-  const grades = widened ? SOFT_FALLBACK_GRADES : SOFT_GRADES;
-  const which = `${grades.slice(0, -1).split("").join(", ")}${grades.length > 2 ? "," : ""} or ${grades.slice(-1)}`;
-  const blurb = `Every player faces a defense graded ${which} against his position, on lines priced ${SOFT_MIN_ODDS} or longer.`
-    + (widened ? ` Too few ${SOFT_GRADES.split("").join(" or ")} matchups had a usable line, so ${SOFT_FALLBACK_GRADES.replace(SOFT_GRADES, "").split("").join(" and ")} ones are in too.` : "");
+  const blurb = `Overs from the players with the biggest roles in their market, on lines priced ${STARTER_MIN_ODDS} or longer.`;
   const seen = new Set<string>();
   const out: Parlay[] = [];
-  SOFT_BANDS.forEach((band, i) => {
+  STARTER_BANDS.forEach((band, i) => {
     const legs = best[i];
     if (!legs) return;
     const sig = legs.map(pickKey).sort().join("&");

@@ -1,9 +1,9 @@
-"""Backtest for the Parlays tab's soft-matchup tiles (frontend/src/parlays.ts, buildSoftMatchupParlays), one leg at a time.
+"""Backtest for the Parlays tab's Starters tiles (frontend/src/parlays.ts, buildStarterParlays), one leg at a time.
 
 A 4-leg tile hits about one time in eight, so its own record says little for hundreds of slates. Everything worth tuning is
-a question about legs: do A/B matchups beat C-F ones at the same price, is -200 the right floor, does picking by role size
-cost accuracy, which markets run hot. So this replays every graded past slate and prices every over in the soft-matchup
-markets, main and alternate lines, at every grade (not only the section's), and slices the results.
+a question about legs: is -200 the right floor, how big a role is big enough, does the matchup grade matter after all,
+which markets run hot. So this replays every graded past slate and prices every over in the starter markets, main and
+alternate lines, at every role size and grade, and slices the results.
 
 Per leg: the projection from the run the board snapshot used (pick_log.run_id), its matchup grade and role percentile, the
 last price before kickoff at each book (NFL: odds_history up to the game's last snapshot; NBA: the game's stored main and
@@ -16,16 +16,22 @@ LADDER_MARKET_WEIGHT). The live ladder also mixes in the market curve read off e
 Caveats: rush + rec had no matchup grade before Nov 2026, so older runs borrow the back's rushing grade or the receiver's
 receiving grade. A player's rungs are one outcome counted several times: `players` gives the honest sample size.
 
-First run, Nov 23, 2026 (NFL Oct 19 - Nov 22, 70 games; NBA Oct 20 - Nov 22, 211 games; best price per line, overs
--200 or longer and 50%+ likely):
+First run, Nov 23, 2026, when the tiles still required an A/B matchup (NFL Oct 19 - Nov 22, 70 games; NBA Oct 20 -
+Nov 22, 211 games; best price per line, overs -200 or longer and 50%+ likely). It's why they now rank by role alone:
 - The matchup grade didn't sort winners from losers. NFL A 46% / B 48% / C 60% / D 39% / F 56% hit; NBA A 56% / B 59% /
   C 53% / D 59% / F 65%. Each is ~130-450 players, so a few points either way is noise, and no order shows up.
-- Role size did: NBA legs from the top third of roles hit 61% (+3% ROI) against 52% (-12%) from the bottom third.
-- The NFL legs the tiles use hit 47% where the blend said 57% (-18% at the price): six weeks of one-sided overs, too few
-  to fit anything to yet. NBA was close to the price (-3%).
+- Role size did: A/B NBA legs from the top third of roles hit 61% (+3% ROI) against 52% (-12%) from the bottom third.
+- The A/B NFL legs hit 47% where the blend said 57% (-18% at the price): six weeks of one-sided overs, too few to fit
+  anything to yet. NBA was close to the price (-3%).
 - Alternate lines beat main lines in both (NFL -14% vs -20%, NBA 0% vs -6%), and the price floor showed no cliff at -200.
 
-    python -m app.soft_backtest [--sport nfl|nba|both] [--csv legs.csv]
+Second run, same data, every grade (the tiles as they are now):
+- The tiles' legs (top-half roles) came out NBA +1% ROI against -2% for any role at the same floor; NFL -12% against -11%.
+- NBA's bottom third of roles is the part worth leaving out (54% hit, -8%); the top third (59%, -3%) did no better than
+  the middle (62%, +4%). NFL showed no role effect: every third lost 4-14% at the price.
+- Grades still sorted nothing among the tiles' legs (NBA F 75%, C 53%; NFL C 59%, A 43%).
+
+    python -m app.starter_backtest [--sport nfl|nba|both] [--csv legs.csv]
 """
 import argparse
 import math
@@ -40,15 +46,15 @@ from .engine import odds
 from .engine.dvp import grade as dvp_grade
 from .engine.ladder import price_quote
 
-# mirrors parlays.ts: softKinds, SOFT_GRADES, SOFT_MIN_ODDS, SOFT_MIN_PROB, LADDER_MARKET_WEIGHT
-SOFT_KINDS = {"nfl": ("rush", "rec", "rr", "pass"), "nba": ("pts", "reb", "ast", "pra", "pr", "pa")}
-SOFT_GRADES = "AB"
-SOFT_MIN_ODDS = -200
-SOFT_MIN_PROB = 0.5
+# mirrors parlays.ts: starterKinds, STARTER_MIN_ODDS, STARTER_MIN_PROB, LADDER_MARKET_WEIGHT
+STARTER_KINDS = {"nfl": ("rush", "rec", "rr", "pass"), "nba": ("pts", "reb", "ast", "pra", "pr", "pa")}
+STARTER_MIN_ODDS = -200
+STARTER_MIN_PROB = 0.5
 MARKET_WEIGHT = 0.35
 # legs outside this price range aren't kept at all (far from anything the tiles could use)
 KEEP_ODDS = (-400, 300)
-# the role percentile above which a player counts as a "starter" for the as-built slice (the tiles take the biggest roles first)
+# the role percentile a leg needs in the as-built slice: the tiles search the slate's 12 biggest roles with a usable line,
+# which on a full slate is about the top half of each market's priced overs
 TOP_ROLE = 0.5
 PRICE_BUCKETS = [(-400, -301, "-400 to -301"), (-300, -201, "-300 to -201"), (-200, -151, "-200 to -151"),
                  (-150, -101, "-150 to -101"), (-100, 300, "-100 to +300")]
@@ -127,7 +133,7 @@ def _graded_log(session, table, slate_of) -> pd.DataFrame:
 
 
 def nfl_legs(session) -> pd.DataFrame:
-    kinds = SOFT_KINDS["nfl"]
+    kinds = STARTER_KINDS["nfl"]
     log = _graded_log(session, PickLog, lambda r: f"{r.season}-W{r.week:02d}")
     if log.empty:
         return pd.DataFrame(columns=LEG_COLUMNS)
@@ -152,7 +158,7 @@ def nfl_legs(session) -> pd.DataFrame:
 
 
 def nba_legs(session) -> pd.DataFrame:
-    kinds = SOFT_KINDS["nba"]
+    kinds = STARTER_KINDS["nba"]
     log = _graded_log(session, NbaPickLog, lambda r: str(r.gameday))
     if log.empty:
         return pd.DataFrame(columns=LEG_COLUMNS)
@@ -192,28 +198,33 @@ def summarize(legs: pd.DataFrame, label: str) -> dict:
                 breakeven=float((1 / dec).mean()), roi=float((wins * dec).mean() - 1))
 
 
-def in_section(legs: pd.DataFrame, grades: str = SOFT_GRADES) -> pd.DataFrame:
-    """The legs the tiles could use: graded in `grades`, priced SOFT_MIN_ODDS or longer, at least SOFT_MIN_PROB likely."""
-    return legs[legs.grade.isin(list(grades)) & (legs.odds >= SOFT_MIN_ODDS) & (legs.prob >= SOFT_MIN_PROB)]
+def usable(legs: pd.DataFrame) -> pd.DataFrame:
+    """Legs at the tiles' price floor: STARTER_MIN_ODDS or longer, at least STARTER_MIN_PROB likely (any role, any grade)."""
+    return legs[(legs.odds >= STARTER_MIN_ODDS) & (legs.prob >= STARTER_MIN_PROB)]
+
+
+def in_section(legs: pd.DataFrame) -> pd.DataFrame:
+    """The legs the tiles could use: usable, from the top TOP_ROLE of their market's roles."""
+    u = usable(legs)
+    return u[u.role >= TOP_ROLE]
 
 
 def report(legs: pd.DataFrame) -> list[dict]:
     """The slices that answer the tuning questions, on each line's best price."""
     legs = best_price(legs)
-    usable = legs[(legs.odds >= SOFT_MIN_ODDS) & (legs.prob >= SOFT_MIN_PROB)]
+    use, sec = usable(legs), in_section(legs)
     out = [summarize(legs, "all legs (-400 to +300)"),
-           summarize(in_section(legs), "as built: A/B, -200 or longer, 50%+"),
-           summarize(in_section(legs)[in_section(legs).role >= TOP_ROLE], "as built, top-half roles"),
-           summarize(in_section(legs, "ABC"), "widened: A-C, -200 or longer, 50%+")]
-    # grade at the section's price floor: does a soft matchup beat a tough one at the same price?
-    out += [summarize(usable[usable.grade == g], f"grade {g} (-200 or longer, 50%+)") for g in "ABCDF"]
-    out.append(summarize(usable[usable.grade.isna()], "no grade (-200 or longer, 50%+)"))
-    graded = legs[legs.grade.isin(list(SOFT_GRADES))]
-    out += [summarize(graded[(graded.odds >= lo) & (graded.odds <= hi)], f"A/B priced {name}") for lo, hi, name in PRICE_BUCKETS]
-    sec = in_section(legs)
-    out += [summarize(sec[sec.kind == k], f"as built, {k}") for k in sorted(sec.kind.unique())]
+           summarize(use, "-200 or longer, 50%+, any role"),
+           summarize(sec, "as built: top-half roles, -200 or longer, 50%+")]
+    # role at the price floor: do the biggest roles beat the smallest at the same price?
     for lo, hi, name in ((0, 1 / 3, "bottom third"), (1 / 3, 2 / 3, "middle third"), (2 / 3, 1.01, "top third")):
-        out.append(summarize(sec[(sec.role >= lo) & (sec.role < hi)], f"as built, role {name}"))
+        out.append(summarize(use[(use.role >= lo) & (use.role < hi)], f"role {name} (-200 or longer, 50%+)"))
+    # grade among the tiles' legs: kept to see whether it ever starts to matter
+    out += [summarize(sec[sec.grade == g], f"as built, grade {g}") for g in "ABCDF"]
+    out.append(summarize(sec[sec.grade.isna()], "as built, no grade"))
+    top = legs[legs.role >= TOP_ROLE]
+    out += [summarize(top[(top.odds >= lo) & (top.odds <= hi)], f"top-half roles priced {name}") for lo, hi, name in PRICE_BUCKETS]
+    out += [summarize(sec[sec.kind == k], f"as built, {k}") for k in sorted(sec.kind.unique())]
     out += [summarize(sec[sec.alt == a], f"as built, {'alternate' if a else 'main'} lines") for a in (False, True)]
     return out
 
@@ -240,7 +251,7 @@ def main(argv=None) -> None:
             if a.sport in (sport, "both"):
                 legs = fn(s)
                 frames.append(legs)
-                print(format_report(report(legs), f"\n{sport.upper()} soft-matchup legs (best price per line)"))
+                print(format_report(report(legs), f"\n{sport.upper()} starter legs (best price per line)"))
     if a.csv and frames:
         pd.concat(frames, ignore_index=True).to_csv(a.csv, index=False)
         print(f"\nwrote {a.csv}")

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { api, type Filters } from "./api";
 import { getLeague } from "./league";
 import { moneylinePicks } from "./moneyline";
-import { buildBalancedLadders, buildLadderParlays, buildSoftMatchupParlays, softTargets, buildTdParlays, buildThreesLadders, defaultBook, filterGames, ladderProps, ladderTargets, LADDER_PLAYERS_PER_TEAM, moneylineRungs, parlaysByBook, THREES_CANDIDATES, type ParlayLeg } from "./parlays";
+import { buildBalancedLadders, buildLadderParlays, buildStarterParlays, starterTargets, buildTdParlays, buildThreesLadders, defaultBook, filterGames, ladderProps, ladderTargets, LADDER_PLAYERS_PER_TEAM, moneylineRungs, parlaysByBook, THREES_CANDIDATES, type ParlayLeg } from "./parlays";
 import { usePref } from "./prefs";
 
 // Parlays rank by win probability, not EV, so they price every play (any EV) at the default market weight
@@ -83,15 +83,15 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
     return activeBook && i >= 0 ? buildTdParlays(tdQueries[i]?.data ?? [], activeBook, chosenGames, corr) : [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBook, books, chosenGames, tdStamp, corr]);
-  // soft-matchup parlays: players against soft defenses, pulled separately (most aren't among the likeliest overs above); shares the ladder cache
-  const softTargetList = useMemo(() => (activeBook ? softTargets(gamePicks[activeBook] ?? []) : []), [activeBook, gamePicks]);
-  const softQueries = useQueries({
-    queries: softTargetList.map((t) => ({ queryKey: ["ladder", t.player_id, t.kind, 0], queryFn: () => api.lines(t.player_id, t.kind, 0), enabled })),
+  // starter parlays: the biggest roles' ladders, pulled separately (most aren't among the likeliest overs above); shares the ladder cache
+  const starterTargetList = useMemo(() => (activeBook ? starterTargets(gamePicks[activeBook] ?? []) : []), [activeBook, gamePicks]);
+  const starterQueries = useQueries({
+    queries: starterTargetList.map((t) => ({ queryKey: ["ladder", t.player_id, t.kind, 0], queryFn: () => api.lines(t.player_id, t.kind, 0), enabled })),
   });
-  const softStamp = softQueries.map((q) => q.dataUpdatedAt).join();
-  const softParlays = useMemo(() => activeBook ? buildSoftMatchupParlays(softTargetList.map((base, i) => ({ base, ladder: softQueries[i]?.data })), activeBook, corr) : [],
+  const starterStamp = starterQueries.map((q) => q.dataUpdatedAt).join();
+  const starterParlays = useMemo(() => activeBook ? buildStarterParlays(starterTargetList.map((base, i) => ({ base, ladder: starterQueries[i]?.data })), activeBook, corr) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeBook, softTargetList, softStamp, corr]);
+    [activeBook, starterTargetList, starterStamp, corr]);
   const altProps = useMemo(() => activeBook ? ladderProps(ladderEntries, activeBook) : [], [activeBook, ladderEntries]);
   const ladders = useMemo(() => [...ladderParlays, ...threesLadders, ...balancedLadders], [ladderParlays, threesLadders, balancedLadders]);
 
@@ -103,6 +103,6 @@ export function useParlayBoard(books: string[], chosenGames: string[], enabled: 
     // would beat their saved sportsbook on the next visit
     parlayCounts, loading, failed, retry, book: activeBook, pickedBook: book && books.includes(book) ? book : null, setBook, parlays: (activeBook && byBook[activeBook]) || [], tdParlays, ladders, altProps,
     laddersLoading: ladderQueries.some((q) => q.isLoading) || threesQueries.some((q) => q.isLoading),
-    softParlays, softLoading: softQueries.some((q) => q.isLoading),
+    starterParlays, startersLoading: starterQueries.some((q) => q.isLoading),
   };
 }

@@ -1,10 +1,10 @@
-"""The soft-matchup backtest: every soft-market over replayed at its last price before kickoff and graded leg by leg."""
+"""The Starters backtest: every starter-market over replayed at its last price before kickoff and graded leg by leg."""
 from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
 
-from app import soft_backtest as sb
+from app import starter_backtest as sb
 from app.db import OddsHistory, PickLog, Projection, Run, SessionLocal
 
 G = "2026_10_AAA_BBB"
@@ -45,7 +45,7 @@ def slate():
             proj(run.id, "rb", "rush", 60.0, 5, pos="RB"), proj(run.id, "rb", "rr", 80.0, None, pos="RB"),
             logged(run.id, "rb", "rush", 60.0, 55.0), logged(run.id, "rb", "rr", 80.0, 75.0),
             # sat out: void, never graded as a leg
-            proj(run.id, "out", "rec", 50.0, 1), logged(run.id, "out", "rec", 50.0, None, "void"),
+            proj(run.id, "out", "rec", 60.0, 1), logged(run.id, "out", "rec", 60.0, None, "void"),
         ])
         s.add_all([
             quote("Ann Arbor", "rec", 69.5, -180), quote("Ann Arbor", "rec", 79.5, -120), quote("Ann Arbor", "rec", 99.5, 150),
@@ -90,17 +90,18 @@ def test_role_percentiles_rank_each_market_within_its_slate():
     assert (r[("W1", "a", "rec")], r[("W1", "c", "rec")], r[("W1", "b", "rec")], r[("W1", "q", "pass")]) == (1.0, 0.5, 0.0, 1.0)
 
 
-def test_report_compares_grades_at_the_section_price_floor(slate):
+def test_report_compares_roles_at_the_section_price_floor(slate):
     with SessionLocal() as s:
-        rows = {r["slice"]: r for r in sb.report(sb.nfl_legs(s))}
-    built = rows["as built: A/B, -200 or longer, 50%+"]
-    # best price per line: wr1 79.5 counts once (FanDuel's -110), and every leg left is graded A/B, -200 or longer, 50%+
+        legs = sb.nfl_legs(s)
+    rows = {r["slice"]: r for r in sb.report(legs)}
+    # receiving roles that slate: wr2 55 (0), the sat-out player 60 (0.5), wr1 80 (1); rb tops rushing and rush + rec
+    built = rows["as built: top-half roles, -200 or longer, 50%+"]
     assert built["players"] == 3 and built["legs"] >= 3 and built["hit"] == pytest.approx(1.0)   # wr1 rec, rb rush, rb rr: all cleared
-    assert rows["grade F (-200 or longer, 50%+)"]["hit"] == 0.0
     assert built["roi"] > 0
-    assert "as built, rec" in rows and rows["no grade (-200 or longer, 50%+)"]["legs"] == 0
-    text = sb.format_report(sb.report(sb.nfl_legs(SessionLocal())), "t")
-    assert "as built" in text
+    assert rows["role bottom third (-200 or longer, 50%+)"]["players"] == 1 and rows["role bottom third (-200 or longer, 50%+)"]["hit"] == 0.0
+    assert rows["as built, grade A"]["players"] == 3 and rows["as built, grade F"]["legs"] == 0   # rb's rush + rec borrows his rushing A
+    assert "as built, rec" in rows and rows["as built, no grade"]["legs"] == 0
+    assert "as built" in sb.format_report(sb.report(legs), "t")
 
 
 def test_summary_counts_pushes_out_and_prices_the_return():
