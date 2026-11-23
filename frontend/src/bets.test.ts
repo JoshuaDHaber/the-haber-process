@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boostPct, costOf, leadOf, legLeague, NO_PROMO, parseOdds, promoBody, promoOf, promoReady, promoReturn, refundOf, signedMoney, winReturn } from "./bets";
+import { boostPct, costOf, leadOf, legLeague, NO_PROMO, parseOdds, promoBody, promoOf, promoReady, promoReturn, refundOf, signedMoney, voidableLegs, winReturn, type TrackedBet, type TrackedLeg } from "./bets";
 
 describe("bets helpers", () => {
   it("reads American odds typed by hand and refuses anything else", () => {
@@ -14,6 +14,17 @@ describe("bets helpers", () => {
     expect(legLeague({ kind: "rush" })).toBe("nfl");
     expect(legLeague({ kind: "ml", gameId: "2026_20261104_BOS_NYK" })).toBe("nba");
     expect(legLeague({ kind: "ml", gameId: "2026_09_KC_DEN" })).toBe("nfl");
+  });
+
+  it("offers a parlay's started, still-counting graded legs to mark voided by the book", () => {
+    const at = (h: number) => new Date(Date.UTC(2026, 10, 22, h)).toISOString().slice(0, 19);
+    const lg = (id: number, o: Partial<TrackedLeg>) => ({ id, kind: "rush", kickoff: at(18), result: null, ...o }) as TrackedLeg;
+    const bet = (legs: TrackedLeg[]) => ({ legs }) as TrackedBet;
+    const now = Date.UTC(2026, 10, 22, 21);
+    const legs = [lg(1, { result: "loss" }), lg(2, {}), lg(3, { kickoff: at(23) }), lg(4, { result: "void" }), lg(5, { result: "push" }),
+      lg(6, { kind: "custom" }), lg(7, { kind: "ml", result: "win" })];
+    expect(voidableLegs(bet(legs), now).map((l) => l.id)).toEqual([1, 2, 7]);
+    expect(voidableLegs(bet([lg(1, {})]), now)).toEqual([]);   // a single: the whole bet is marked void instead
   });
 
   it("signs money", () => {

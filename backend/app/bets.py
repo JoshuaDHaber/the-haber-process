@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from . import auth, config, grading
 from .db import Bet, BetLeg, NbaProjection, NbaRun, Projection, Run, User
 from .market_fit import kickoff_utc
-from .schemas import BetIn, BetLegOut, BetOut, BetPatch, BetPlayer, BetsOut, BetSummary
+from .schemas import BetIn, BetLegOut, BetOut, BetPatch, LegPatch, BetPlayer, BetsOut, BetSummary
 
 router = APIRouter(prefix="/api/me", tags=["bets"])
 
@@ -417,7 +417,8 @@ def _out(bet: Bet, now: datetime) -> BetOut:
         legs=[BetLegOut(id=leg.id, game_id=leg.game_id, gameday=leg.gameday, kickoff=leg.kickoff.isoformat(), player_id=leg.player_id,
                         name=leg.name, team=leg.team, opp=leg.opp, kind=leg.kind, side=leg.side, line=leg.line, odds=leg.odds,
                         alt=leg.alt, prob=leg.prob, ev=leg.ev, actual=leg.actual, result=leg.result,
-                        close_p=leg.close_p, ev_close=leg_ev_close(leg), lead=leg.lead) for leg in bet.legs])
+                        close_p=leg.close_p, ev_close=leg_ev_close(leg), lead=leg.lead,
+                        book_void=bool(leg.book_void)) for leg in bet.legs])
 
 
 def summarize(bets: list) -> BetSummary:
@@ -728,6 +729,32 @@ def edit(bet_id: int, body: BetPatch, user: User = Depends(require_member), db: 
         bet.payout = returned(bet, bet.status)
     if bet.settled_by != "user":
         settle(bet, now)   # stake or odds changed (or handed back): what grading says now
+    db.commit()
+    return _out(bet, now)
+
+
+@router.patch("/bets/{bet_id}/legs/{leg_id}", response_model=BetOut, dependencies=[Depends(auth.same_origin)])
+def mark_leg(bet_id: int, leg_id: int, body: LegPatch, user: User = Depends(require_member), db: Session = Depends(auth.get_db)):
+    """A parlay leg the book voided though the player played (injury protection, a leg the book pulled): it drops out and
+    the parlay pays on the rest, as a leg he didn't play in does (settle). book_void false hands the leg back to grading:
+    graded again from the stat line it already has, or left for the next run, and a payout typed in for the void no longer
+    applies, so a bet settled by hand goes back to grading too. Marking a leg leaves a bet settled by hand as it was."""
+    bet = _mine(db, user, bet_id)
+    leg = next((lg for lg in bet.legs if lg.id == leg_id), None)
+    if leg is None:
+        raise HTTPException(404, "No such leg")
+    if len(bet.legs) < 2 or leg.kind == CUSTOM:
+        raise HTTPException(422, "Only a parlay's player props and moneylines can be voided one at a time; mark the bet void instead")
+    now = datetime.utcnow()
+    if body.book_void:
+        if leg.kickoff > now:
+            raise HTTPException(422, "That leg's game hasn't started yet")
+        leg.result, leg.book_void = "void", True
+    elif leg.book_void:
+        leg.book_void, bet.settled_by = None, None if bet.settled_by == "user" else bet.settled_by
+        leg.result = None if leg.graded_at is None else grading.outcome(leg.side, leg.line, leg.actual)
+    fill_dropped_prices(db, bet)
+    settle(bet, now)
     db.commit()
     return _out(bet, now)
 

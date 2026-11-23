@@ -12,6 +12,8 @@ export interface TrackedLeg {
   actual: number | null; result: "win" | "loss" | "push" | "void" | null;
   /** A moneyline's team's largest lead in the game (fetched for an early-win bet that didn't win outright). */
   lead?: number | null;
+  /** The bettor marked it voided by the book though the player played (injury protection, say): it dropped out of the parlay. */
+  book_void?: boolean;
   /** The market's fair chance of this leg at kickoff, and what the price taken was worth at it (null until it closes). */
   close_p: number | null; ev_close: number | null;
 }
@@ -87,6 +89,13 @@ export async function trackBets(book: string, legs: Leg[], asParlay: boolean, st
 export const editBet = (id: number, patch: { stake?: number; odds?: number; notes?: string; status?: BetStatus; tags?: string[];
   /** with status "won": what the book actually paid back */ payout?: number } & Partial<PromoBody>) =>
   call<TrackedBet>(`bets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+/** Mark a parlay leg voided by the book though the player played (injury protection), or hand it back to grading. */
+export const markLeg = (betId: number, legId: number, bookVoid: boolean) =>
+  call<TrackedBet>(`bets/${betId}/legs/${legId}`, { method: "PATCH", body: JSON.stringify({ book_void: bookVoid }) });
+/** The legs of a parlay the bettor can mark voided by the book: graded props and moneylines whose game has started and
+ *  that haven't already dropped out. */
+export const voidableLegs = (bet: TrackedBet, now = Date.now()) => bet.legs.length < 2 ? [] :
+  bet.legs.filter((l) => l.kind !== "custom" && l.result !== "void" && l.result !== "push" && new Date(l.kickoff + "Z").getTime() <= now);
 export const deleteBet = (id: number) => call<void>(`bets/${id}`, { method: "DELETE" });
 
 /** The leagues' player markets don't overlap, so a leg's market says which league it's from; a moneyline is in both, so its

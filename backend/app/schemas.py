@@ -752,6 +752,11 @@ class BetPatch(BaseModel):
     status: Optional[Literal["open", "won", "lost", "push", "void"]] = None
 
 
+class LegPatch(BaseModel):
+    # the book voided this parlay leg though the player played (injury protection, say); false hands it back to grading
+    book_void: bool
+
+
 class BetLegOut(BaseModel):
     id: int
     game_id: str
@@ -770,6 +775,7 @@ class BetLegOut(BaseModel):
     ev: Optional[float] = None
     actual: Optional[float] = None
     lead: Optional[float] = None      # a moneyline's team's largest lead (fetched for early-win bets)
+    book_void: bool = False           # the bettor marked it voided by the book though he played (LegPatch)
     result: Optional[str] = None
     close_p: Optional[float] = None   # the market's fair chance of this leg at kickoff (None: not started, or no closing quotes)
     ev_close: Optional[float] = None  # what this price was worth at that chance: close_p x decimal odds - 1

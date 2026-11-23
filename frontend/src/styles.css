@@ -1130,6 +1130,11 @@ main:focus { outline: none; }
 .bet-confirm .bet-edit-row { align-items: center; }
 /* a parlay with a voided leg whose price isn't known: what the book paid settles it */
 .bet-needs-payout { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.bet-void-pick { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; }
+.bet-void-pick p { margin: 0 0 8px; }
+.bet-void-legs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.bet-void-legs .chip-btn { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; }
+.bet-leg-undo { font-size: 12px; padding: 8px 6px; margin: -8px -2px; }   /* a 32px tap target that doesn't push the line apart */
 .bet-needs-payout p { margin: 0 0 8px; } .bet-needs-payout .auth-label { display: flex; flex-direction: column; gap: 4px; width: 140px; }
 button.danger-btn { background: var(--bad); color: var(--card); border: 0; padding: 8px 14px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; }
 button.danger-btn:disabled { opacity: .6; cursor: default; }
