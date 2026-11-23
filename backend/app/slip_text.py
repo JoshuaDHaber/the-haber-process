@@ -4,6 +4,7 @@ out differently, so each has its own rules; the result has bet_screens.SCHEMA's 
 to players exactly as it does Claude's reading. Rules exist for bet365, FanDuel, DraftKings (its bet slip and its bet card) and Fanatics.
 """
 import re
+from difflib import SequenceMatcher
 from typing import Optional
 
 # American odds standing alone (+1300, -110): not part of a dollar amount or a longer number
@@ -159,28 +160,76 @@ DK_MARKETS = re.compile(r"(?i)\b(points\s?\+\s?rebounds\s?\+\s?assists|points\s?
 DK_NEED = re.compile(r"(?i)(?<![\d.])(\d+(?:\.\d)?)\+|\b(over|under|o|u)\s?(\d+\.\d)\b")
 
 
+# the same names as plain words, for a market OCR misspelt ("Ja'Marr Chase RggaiVing Yards" in a photo of the screen)
+DK_PHRASES = ["points + rebounds + assists", "points + rebounds", "points + assists", "rebounds + assists", "steals + blocks",
+              "three pointers made", "rushing + receiving yards", "passing yards", "rushing yards", "receiving yards",
+              "passing touchdowns", "longest reception", "longest rush", "anytime td scorer", "interceptions thrown", "pass completions"]
+# the header's list of every leg's need, in the legs' order ("100+, 60+, 40+, 40+"): a leg whose own need OCR lost takes it
+DK_NEEDS = re.compile(r"^\W*((?:\d+(?:\.\d)?\+\s*,\s*)+\d+(?:\.\d)?\+)")
+
+
+def _dk_market(line: str) -> Optional[tuple]:
+    """(where it starts, its name) for the DraftKings market in the line: as written, or else the market whose name the
+    words are closest to, when that's close (4 letters in 5 right) and clearly closer than any other."""
+    m = DK_MARKETS.search(line)
+    if m:
+        return m.start(), m.group(1)
+    words = list(re.finditer(r"\S+", line))
+    scores = {}
+    for phrase in DK_PHRASES:
+        n = len(phrase.split())
+        for i in range(len(words) - n + 1):
+            r = SequenceMatcher(None, " ".join(w.group(0) for w in words[i:i + n]).lower(), phrase).ratio()
+            if r > scores.get(phrase, (0,))[0]:
+                scores[phrase] = (r, words[i].start())
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1][0])
+    if ranked and ranked[0][1][0] >= 0.78 and (len(ranked) == 1 or ranked[0][1][0] - ranked[1][1][0] >= 0.05):
+        return ranked[0][1][1], ranked[0][0]
+    return None
+
+
 def _draftkings(lines: list[str]) -> list[dict]:
     """DraftKings: what the leg needs ("35+") on one line, beside the icons OCR reads as noise ("© @ 20+0©"), then the player
-    and market on the next ("Luka Doncic Three Pointers Made"). The header's list of every leg's need ("35+, 20+, 5+") is
-    skipped: a leg's line has one."""
+    and market on the next ("Luka Doncic Three Pointers Made"). In a photo of the screen OCR loses some of it: a misspelt
+    market is still found, and a leg whose own need is lost takes it from the header's list ("100+, 60+, 40+, 40+")."""
+    header = next((DK_NEEDS.match(ln) for ln in lines if DK_NEEDS.match(ln)), None)
+    header_needs = re.findall(r"\d+(?:\.\d)?\+", header.group(1)) if header else []
     out = []
-    for ln, nxt in zip(lines, lines[1:]):
-        needs = DK_NEED.findall(ln)
-        market = DK_MARKETS.search(nxt)
-        if len(needs) != 1 or not market or re.search(r"(?i)parlay|wager|paid", ln):
+    marked = [_dk_market(ln) if not re.search(r"(?i)parlay|wager|paid", ln) else None for ln in lines]
+    for i, ln in enumerate(lines):
+        if not marked[i]:
             continue
-        plus, side_word, ou_line = needs[0]
+        at, market = marked[i]
         # the player is the capitalised words right before the market; icon noise before them ("ify", "a4,", "g") is dropped
-        words = nxt[:market.start()].split()
+        words = ln[:at].split()
         name = []
         for w in reversed(words):
-            if not re.fullmatch(r"[A-Z][A-Za-z.'\-]*|[A-Z]{2,3}|(?:Jr|Sr)\.?|I{2,3}|IV", w):
+            if re.fullmatch(r"[A-Z][A-Za-z.'\-]*|[A-Z]{2,3}|(?:Jr|Sr)\.?|I{2,3}|IV", w):
+                name.insert(0, w)
+            elif len(name) == 1 and re.fullmatch(r"[a-z][a-z'\-]{2,}", w):   # OCR lowered the first name ("stefon Diggs")
+                name.insert(0, w.capitalize())
                 break
-            name.insert(0, w)
+            else:
+                break
         name = _name(" ".join(name))
-        label = re.sub(r"\s+", " ", market.group(1)).title().replace(" + ", " + ")
-        need = f"{plus}+" if plus else f"{'Under' if side_word.lower().startswith('u') else 'Over'} {ou_line}"
-        out.append(_leg(name, label, f"{name} {need} {label}"))
+        if not name:
+            continue
+        # its need: on one of the two lines above (not past another leg's market), else the header's, in order
+        need = None
+        for j in (i - 1, i - 2):
+            if j < 0 or marked[j] or re.search(r"(?i)parlay|wager|paid", lines[j]) or DK_NEEDS.match(lines[j]):
+                break
+            found = DK_NEED.findall(lines[j])
+            if len(found) == 1:
+                plus, side_word, ou_line = found[0]
+                need = f"{plus}+" if plus else f"{'Under' if side_word.lower().startswith('u') else 'Over'} {ou_line}"
+                break
+        if need is None and len(header_needs) > len(out):
+            need = header_needs[len(out)]
+        label = re.sub(r"\s+", " ", market).title().replace(" + ", " + ").replace("Td", "TD")
+        if need is None and _kind(label) not in YES_NO:
+            continue
+        out.append(_leg(name, label, " ".join(f"{name} {need or ''} {label}".split())))
     return out
 
 
@@ -207,13 +256,15 @@ def _dk_card(lines: list[str]) -> list[dict]:
             names = [_name(p) for p in parts]
             break
     shown = {}
-    for prev, ln in zip(lines[head:], lines[head + 1:]):
-        m = DK_LABEL.match(re.sub(r"^(?:(?:[^\w\s]|\b\w\b)+\s*)+", "", ln))   # after the leg's status circle ("O !")
+    for i in range(head + 1, len(lines)):
+        m = DK_LABEL.match(re.sub(r"^(?:(?:[^\w\s]|\b\w\b)+\s*)+", "", lines[i]))   # after the leg's status circle ("O !")
         if not m:
             continue
-        clean = prev.replace("’", "'")
-        # the player: whichever listed name's surname is on the line above, else the capitalised words at its end
-        who = next((n for n in names if n.split()[-1].lower() in clean.lower()), None)
+        # the player: whichever listed name's surname is on one of the two lines above (OCR can put the jersey number, "Oo 5",
+        # between), else the capitalised words at the end of the line above
+        above = [lines[j].replace("’", "'") for j in (i - 1, i - 2) if j > head]
+        clean = above[0] if above else ""
+        who = next((n for ln in above for n in names if n.split()[-1].lower() in ln.lower()), None)
         if who is None:
             tail = NAME.findall(clean)
             who = _name(tail[-1]) if tail else None
@@ -299,8 +350,8 @@ def parse(text: str) -> dict:
             book = b
     if fanatics:
         book = "Fanatics"
-    if card and legs is card:
-        book = "DraftKings"   # its card never names the book
+    if card and legs is card or book is None and (legs is dk and legs or re.search(r"\bDK\d{12,}", text)):
+        book = "DraftKings"   # its bet card never names the book; its bet id does ("ID: DK639310633167204887")
     # the bet's price: beside "Parlay" / "Single" or on the line after it (Apple's reader splits "SAME GAME PARLAY" / "+1300")
     head = next((ln if ODDS.search(ln) else nxt for ln, nxt in zip(lines, lines[1:] + [""])
                  if re.search(r"(?i)parlay|single|straight", ln) and not re.search(r"(?i)boost", ln)
