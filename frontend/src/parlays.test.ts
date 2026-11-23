@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Ladder, LadderRow, Pick } from "./api";
-import { bestBook, buildBalancedLadders, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays, THREES_MAX_TILES_PER_PLAYER, THREES_PLAYERS } from "./parlays";
+import { bestBook, buildBalancedLadders, buildStarterParlays, starterTargets, spreadRungs, STARTER_MIN_LEGS, STARTER_MAX_LEGS, STARTER_MIN_ODDS, STARTER_PER_TEAM, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays, THREES_MAX_TILES_PER_PLAYER, THREES_PLAYERS } from "./parlays";
 import { setLeague } from "./league";
 import { toAmerican, toDecimal } from "./slip";
 
@@ -432,5 +432,82 @@ describe("same-game correlation", () => {
     const pro = { "opp|rush:RB|rush:RB": 0.3 };
     expect(buildLadderParlays(entries, "DraftKings", pro)[0].legs.map((l) => l.player_id).sort()).toEqual(["b", "c"]);
     expect(buildLadderParlays(entries, "DraftKings", corr)[0].legs.map((l) => l.player_id).sort()).toEqual(["a", "c"]);
+  });
+});
+
+describe("starter parlays", () => {
+  // each player in his own game and team, entries biggest role first (as starterTargets orders them)
+  const entry = (id: string, ...quotes: LadderRow[]) =>
+    ({ base: over({ player_id: id, name: id, game_id: `g-${id}`, team: id }), ladder: ladder(...quotes) });
+  const plusRungs = () => [rung(40.5, -180, 0.66), rung(50.5, -130, 0.6), rung(60.5, 110, 0.52)];
+
+  it("builds a 4-, 5- and 6-leg tile, every leg at the price floor or longer, one per player", () => {
+    const entries = ["a", "b", "c", "d", "e", "f", "g"].map((id) => entry(id, ...plusRungs(), rung(20.5, -350, 0.85)));
+    const parlays = buildStarterParlays(entries, "DraftKings");
+    expect(parlays.map((p) => p.legs.length)).toEqual([4, 5, 6]);
+    for (const p of parlays) {
+      expect(p.title).toContain(`${p.legs.length}-leg`);
+      expect(p.legs.length).toBeGreaterThanOrEqual(STARTER_MIN_LEGS);
+      expect(p.legs.length).toBeLessThanOrEqual(STARTER_MAX_LEGS);
+      expect(p.decimal).toBeGreaterThanOrEqual(4);
+      expect(p.legs.every((l) => l.odds >= STARTER_MIN_ODDS)).toBe(true);
+      expect(new Set(p.legs.map((l) => l.player_id)).size).toBe(p.legs.length);
+    }
+  });
+
+  it("says when a longer tile is the shorter one plus a leg", () => {
+    const parlays = buildStarterParlays(["a", "b", "c", "d", "e"].map((id) => entry(id, ...plusRungs())), "DraftKings");
+    const five = parlays.find((p) => p.legs.length === 5);
+    expect(five?.extends).toBe("starters-4");
+    expect(five?.blurb).toMatch(/^The 4-leg plus [a-e]\./);
+  });
+
+  it("builds nothing with fewer than four usable players", () => {
+    expect(buildStarterParlays([entry("a", ...plusRungs()), entry("b", ...plusRungs()), entry("c", ...plusRungs()),
+      entry("x", rung(20.5, -900, 0.95))], "DraftKings")).toEqual([]);
+  });
+
+  it("targets the biggest roles, whatever the matchup, in the starter markets only", () => {
+    let n = 0;   // every player on his own team, so the per-team cap stays out of it
+    const t = () => ({ team: `T${n++}` });
+    const rows = [
+      // receiving: the starter projects 80, the backup 15 (and is likelier, being a small line); grades don't matter
+      over({ player_id: "wr1", kind: "rec", mu: 80, prob: 0.55, dvp_rank: 30, dvp_n: 30, ...t() }), over({ player_id: "wr4", kind: "rec", mu: 15, prob: 0.8, ...t() }),
+      over({ player_id: "wr2", kind: "rec", mu: 50, prob: 0.6, dvp_rank: 1, dvp_n: 30, ...t() }),
+      // passing: every QB's yards dwarf a receiver's, so the percentile is what compares them
+      over({ player_id: "qb1", kind: "pass", mu: 280, prob: 0.55, ...t() }), over({ player_id: "qb2", kind: "pass", mu: 190, prob: 0.6, ...t() }),
+      // a back in two markets is targeted in the one where his role is biggest
+      over({ player_id: "rb", kind: "rush", mu: 40, prob: 0.6, ...t() }), over({ player_id: "rb", kind: "rr", mu: 70, prob: 0.58, ...t() }),
+      over({ player_id: "rb2", kind: "rush", mu: 70, prob: 0.6, ...t() }), over({ player_id: "rb3", kind: "rr", mu: 30, prob: 0.6, ...t() }),
+      over({ player_id: "flag", kind: "rec", mu: 99, flagged: true, ...t() }), over({ player_id: "td", kind: "td", ...t() }),
+      pick({ player_id: "under", kind: "rec", side: "Under", mu: 99, ...t() }),
+    ];
+    const got = starterTargets(rows);
+    // rec percentiles: wr4 0, wr2 1/3, wr1 2/3, flagged 1; rb2 (rush), rb (rr) and qb1 top their markets; ties go to the likelier play
+    expect(got.map((p) => p.player_id)).toEqual(["rb2", "rb", "qb1", "wr1", "wr2", "wr4", "qb2", "rb3"]);
+    expect(got.find((p) => p.player_id === "rb")?.kind).toBe("rr");
+    expect(starterTargets(rows, 2).map((p) => p.player_id)).toEqual(["rb2", "rb"]);
+  });
+
+  it("caps each team at STARTER_PER_TEAM players", () => {
+    const rows = Array.from({ length: 6 }, (_, i) => over({ player_id: `r${i}`, kind: "rec", mu: 10 * i }));
+    expect(starterTargets(rows)).toHaveLength(STARTER_PER_TEAM);
+  });
+
+  it("ranks NBA rebounds by role too, so a starting center beats a guard's small line", () => {
+    setLeague("nba");
+    try {
+      const rows = [over({ player_id: "c", kind: "reb", mu: 11, prob: 0.55, team: "C" }), over({ player_id: "g", kind: "reb", mu: 3, prob: 0.75, team: "G" }),
+        over({ player_id: "x", kind: "rush", mu: 99 })];
+      expect(starterTargets(rows).map((p) => p.player_id)).toEqual(["c", "g"]);
+    } finally {
+      setLeague("nfl");
+    }
+  });
+
+  it("spreads a player's kept rungs from his shortest line to his longest", () => {
+    const rs = [10, 20, 30, 40, 50, 60, 70].map((line) => over({ line })) as Parameters<typeof spreadRungs>[0];
+    expect(spreadRungs(rs, 3).map((r) => r.line)).toEqual([10, 40, 70]);
+    expect(spreadRungs(rs.slice(0, 2), 3)).toHaveLength(2);
   });
 });

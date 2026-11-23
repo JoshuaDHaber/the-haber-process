@@ -189,14 +189,14 @@ export function ladderTargets(picks: Pick[], n = LADDER_PLAYERS, perTeam = LADDE
 
 /** Likely overs at this book for one player, one per line. Only rungs with a usable betslip link count, so every ladder leg can be added at the book
  *  (main lines have none, and some books publish no links or templates the slip can't fill). */
-export function ladderRungs(base: Pick, ladder: Ladder | undefined, book: string, minOdds = LADDER_MIN_ODDS): ParlayLeg[] {
+export function ladderRungs(base: Pick, ladder: Ladder | undefined, book: string, minOdds = LADDER_MIN_ODDS, minProb = LADDER_MIN_PROB): ParlayLeg[] {
   const byLine = new Map<number, ParlayLeg>();
   for (const r of ladder?.quotes ?? []) {
     const q = r.over;
     if (r.book !== book || !q || q.flag || q.odds < minOdds || linkStatus({ link: q.link }, "xx") !== "direct") continue;
     const dec = toDecimal(q.odds);
     const prob = (1 - LADDER_MARKET_WEIGHT) * q.prob + LADDER_MARKET_WEIGHT / dec;
-    if (prob < LADDER_MIN_PROB) continue;
+    if (prob < minProb) continue;
     const cur = byLine.get(r.line);
     if (cur && cur.odds >= q.odds) continue;
     byLine.set(r.line, { ...base, side: "Over", line: r.line, odds: q.odds, book, p_model: q.prob, p_mkt: 1 / dec, prob, ev: prob * dec - 1,
@@ -362,6 +362,109 @@ export function buildBalancedLadders(entries: LadderEntry[], book: string, gameI
     out.push({ key: `both-${gameId}`, title: `${gameLabel(gameId)}, both teams`, blurb: "The likeliest ladder with a player from each side of the game.",
       legs, ...priceParlay(legs, corr) });
   }
+  return out;
+}
+
+// ---------- starter parlays: 4-6 longer-priced overs from the players with the biggest roles ----------
+/** The markets starter parlays are built from: the yardage and box-score markets with alternate lines. */
+export const starterKinds = (): Kind[] => (getLeague() === "nba" ? ["pts", "reb", "ast", "pra", "pr", "pa"] : ["rush", "rec", "rr", "pass"]);
+/** Shortest price on a leg: these parlays are for payout, so heavy chalk is left to the ladders. */
+export const STARTER_MIN_ODDS = -200;
+/** Lowest chance a leg needs: a coin flip, so plus-money rungs can join. */
+export const STARTER_MIN_PROB = 0.5;
+/** Players whose ladders are pulled, biggest role first, and the most a tile's search looks at. */
+export const STARTER_TARGETS = 16;
+export const STARTER_SEARCH_PLAYERS = 12;
+export const STARTER_PER_TEAM = 4;
+/** Rungs kept per player, spread across his lines, so a 6-leg search stays quick. */
+export const STARTER_RUNGS_PER_PLAYER = 3;
+/** One tile per leg count, each capped in price (decimal odds) so a long rung can't turn it into a lottery ticket. At
+ *  STARTER_MIN_ODDS or longer, 4 legs start near +400, 5 near +660 and 6 near +1040. */
+export const STARTER_BANDS = [
+  { key: "starters-4", title: "Starters 4-leg", legs: 4, lo: 1, hi: 11.0001 },   // up to +1000
+  { key: "starters-5", title: "Starters 5-leg", legs: 5, lo: 1, hi: 21.0001 },   // up to +2000
+  { key: "starters-6", title: "Starters 6-leg", legs: 6, lo: 1, hi: 36.0001 },   // up to +3500
+];
+export const STARTER_MIN_LEGS = STARTER_BANDS[0].legs;
+export const STARTER_MAX_LEGS = STARTER_BANDS[STARTER_BANDS.length - 1].legs;
+
+/** How big a player's role is in each market: where his projection ranks among the slate's overs in that market, 0 (the
+ *  smallest) to 1 (the biggest). A percentile, not a ratio, so markets compare: every starting QB's passing yards dwarf a
+ *  receiver's, and a center's rebounds a guard's. Ranking by chance instead fills the tiles with bench players' 2.5s, which
+ *  are likely because they're small; in the backtest (backend/app/starter_backtest.py) legs from the biggest roles hit
+ *  more often against their price, and the matchup grade, which this once filtered on, sorted nothing. */
+export function roleScores(picks: Pick[], kinds: Kind[] = starterKinds()): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const k of kinds) {
+    const mus = new Map<string, number>();
+    for (const p of picks) if (p.kind === k && p.side === "Over") mus.set(p.player_id, p.mu);
+    const sorted = [...mus].sort((a, b) => a[1] - b[1]);
+    sorted.forEach(([id], i) => out.set(`${id}|${k}`, sorted.length > 1 ? i / (sorted.length - 1) : 1));
+  }
+  return out;
+}
+
+/** The players to pull ladders for, biggest role first (roleScores), each in the market where his role is biggest, at most
+ *  STARTER_PER_TEAM per team. Flagged plays are left out. */
+export function starterTargets(picks: Pick[], n = STARTER_TARGETS): Pick[] {
+  const kinds = starterKinds();
+  const role = roleScores(picks, kinds);
+  const score = (p: Pick) => role.get(`${p.player_id}|${p.kind}`) ?? 0;
+  const best = new Map<string, Pick>();
+  for (const p of picks) {
+    if (p.side !== "Over" || !kinds.includes(p.kind) || p.flagged) continue;
+    const cur = best.get(p.player_id);
+    if (!cur || score(p) > score(cur) || (score(p) === score(cur) && p.prob > cur.prob)) best.set(p.player_id, p);
+  }
+  const teams = new Map<string, number>();
+  const out: Pick[] = [];
+  for (const p of [...best.values()].sort((a, b) => score(b) - score(a) || b.prob - a.prob)) {
+    const team = `${p.game_id}|${p.team}`;
+    if ((teams.get(team) ?? 0) >= STARTER_PER_TEAM) continue;
+    teams.set(team, (teams.get(team) ?? 0) + 1);
+    out.push(p);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+/** At most `n` of a player's rungs, evenly spread from his shortest line to his longest. */
+export function spreadRungs(rungs: ParlayLeg[], n = STARTER_RUNGS_PER_PLAYER): ParlayLeg[] {
+  if (rungs.length <= n) return rungs;
+  if (n <= 1) return rungs.slice(0, n);
+  return [...new Set(Array.from({ length: n }, (_, i) => Math.round((i * (rungs.length - 1)) / (n - 1))))].map((i) => rungs[i]);
+}
+
+/** Starter parlays at one book: for each STARTER_BANDS leg count, the likeliest combination of that many different players'
+ *  overs under its price cap, each leg at STARTER_MIN_ODDS or longer, from the STARTER_SEARCH_PLAYERS biggest roles with a
+ *  usable rung (`entries` come biggest role first, as starterTargets orders them). Tiles share at most MAX_SHARED_PLAYERS
+ *  players with each other and with `avoid` where the pool allows, else repeat the likeliest. */
+export function buildStarterParlays(entries: LadderEntry[], book: string, corr?: CorrTable, avoid: Parlay[] = []): Parlay[] {
+  const pool = entries.map((e) => spreadRungs(ladderRungs(e.base, e.ladder, book, STARTER_MIN_ODDS, STARTER_MIN_PROB)))
+    .filter((r) => r.length).slice(0, STARTER_SEARCH_PLAYERS);
+  if (pool.length < STARTER_MIN_LEGS) return [];
+  const chosen: Pick[][] = avoid.map((p) => p.legs);
+  const best = STARTER_BANDS.map((band) => {
+    const [legs] = searchLadders(pool, [band], (ls) => ls.length === band.legs, corr, band.legs, chosen);
+    if (legs) chosen.push(legs);
+    return legs;
+  });
+  const blurb = `Overs from the players with the biggest roles in their market, on lines priced ${STARTER_MIN_ODDS} or longer.`;
+  const seen = new Set<string>();
+  const out: Parlay[] = [];
+  STARTER_BANDS.forEach((band, i) => {
+    const legs = best[i];
+    if (!legs) return;
+    const sig = legs.map(pickKey).sort().join("&");
+    if (seen.has(sig)) return;
+    seen.add(sig);
+    // on a small pool the longer tile is often the shorter one plus a leg or two: say so, rather than let it read as a new bet
+    const prev = out[out.length - 1];
+    const ext = prev && prev.legs.every((l) => legs.some((m) => pickKey(m) === pickKey(l)));
+    const added = ext ? legs.filter((m) => !prev.legs.some((l) => pickKey(l) === pickKey(m))).map((l) => l.name) : [];
+    out.push({ key: band.key, title: band.title, legs, ...priceParlay(legs, corr), extends: ext ? prev.key : undefined,
+      blurb: ext ? `The ${prev.legs.length}-leg plus ${added.join(" and ")}. ${blurb}` : blurb });
+  });
   return out;
 }
 

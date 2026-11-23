@@ -196,6 +196,8 @@ interface Props {
   /** Omit to hide the game picker (a single game's page builds from that game only). */
   onGames?: (ids: string[]) => void;
   parlays: Parlay[]; tdParlays: Parlay[]; ladders: Parlay[]; altProps: ParlayLeg[]; laddersLoading: boolean;
+  /** Longer-priced parlays of the biggest roles' overs (parlays.ts buildStarterParlays), and whether their ladders are still loading. */
+  starterParlays: Parlay[]; startersLoading: boolean;
   /** Likely-play parlays per book, and a way to switch book, so an empty section can point at a book that has some. */
   parlayCounts?: Record<string, number>;
   onBook?: (b: string) => void;
@@ -217,9 +219,9 @@ const Row = ({ tiles, onSelect, label }: { tiles: Parlay[]; onSelect?: OnSelect;
 };
 
 /** Recommended parlays at one sportsbook: tiles of high-probability plays, then ladder-style tiles, each with the combined odds. */
-export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, parlayCounts, onBook, onSelect }: Props) {
+export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, starterParlays, startersLoading, parlayCounts, onBook, onSelect }: Props) {
   const nba = getLeague() === "nba";
-  const all = [...parlays, ...tdParlays, ...ladders];
+  const all = [...parlays, ...tdParlays, ...ladders, ...starterParlays];
   const likeliest = all.reduce<Parlay | null>((b, p) => (!b || p.prob > b.prob ? p : b), null);
   const rows = ladderRows(ladders, nba);
   return (
@@ -237,6 +239,7 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         { id: "parlays-likely", label: "Likely plays", tiles: parlays },
         { id: "parlays-td", label: "Touchdowns", tiles: nba ? [] : tdParlays },
         { id: "parlays-ladders", label: "Ladders", tiles: ladders },
+        { id: "parlays-starters", label: "Starters", tiles: starterParlays },
       ]} />
 
       <h2 className="parlay-h" id="parlays-likely">Likely plays <Info term="likely" /></h2>
@@ -265,6 +268,14 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         : laddersLoading ? <Skeleton kind="tiles" label="Loading alternate lines…" />
         : <EmptyState compact title={`No ladders at ${book ?? "this sportsbook"} between +100 and +300`}>
             Ladders need alternate lines with betslip links. {nba ? "NBA alternate lines come with the day-of props syncs, and not" : "Not"} every book links them, so another book may have some.
+          </EmptyState>}
+
+      <h2 className="parlay-h" id="parlays-starters">Starters <Info term="starters" /></h2>
+      {starterParlays.length
+        ? <Row tiles={starterParlays} onSelect={onSelect} label="Starter parlays" />
+        : startersLoading ? <Skeleton kind="tiles" label="Loading alternate lines…" />
+        : <EmptyState compact title={`Not enough starters' lines at ${book ?? "this sportsbook"} to build one${selectedGames.length === 1 ? " for this game" : ""}`}>
+            These need at least four players with an over priced -200 or longer that {book ?? "the book"} links to. {selectedGames.length ? "Adding games, or another book, may" : "Another book may"} turn some up.
           </EmptyState>}
 
       {altProps.length > 0 && <>

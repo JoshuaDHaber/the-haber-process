@@ -255,7 +255,7 @@ export default function NbaApp() {
           : <TokenBoard book={debounced.book} marketWeight={debounced.marketWeight} gameIds={dateGames.map((g) => g.game_id)} pills={promoPills} nextUpdate={nextUpdate} />)}
         {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> : board.failed ? <LoadError what="parlays" retry={board.retry} /> :
           <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={dateGames} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays}
-            tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={select} />)}
+            tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} starterParlays={board.starterParlays} startersLoading={board.startersLoading} onSelect={select} />)}
         {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <LoadError what="the injury report" retry={injuries.refetch} /> :
           <NbaInjuries report={injuries.data} games={dateGames} onSelect={select} />)}
         {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> : projections.error && !projections.data ? <LoadError what="projections" retry={projections.refetch} /> :
