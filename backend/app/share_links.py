@@ -6,6 +6,8 @@ found by its ids among those, which says who, which market, which side and line,
 
 The lookup isn't a published API: if FanDuel changes or blocks it, reading fails with a message, and a screenshot still
 works. The response also names the sharer's FanDuel customer id; it's never kept or logged.
+
+DraftKings' share links are read differently, from the post's preview image: see the DraftKings section below.
 """
 import re
 from datetime import datetime, timedelta
@@ -131,3 +133,46 @@ def read(text: str, db: Session, now: datetime, get=None) -> Optional[dict]:
     return {"sportsbook": "FanDuel", "bet_type": "parlay" if len(picks) > 1 else "single", "odds": odds, "stake": None,
             "bonus_stake": None, "to_return": None, "event": {"teams": [], "starts": None}, "legs": legs,
             "share": {"picks": len(picks), "missing": missing, "priced_from_legs": len(legs) > 1 and odds is not None}}
+
+
+# ---------- DraftKings ----------
+# DraftKings' share button posts the bet to DraftKings Social and gives that post's link
+# ("sportsbook.draftkings.com/social/post/<uuid>?slipAdd"). The post itself is only shown to a signed-in DraftKings user and
+# its API refuses anything but DraftKings' own pages, so its picks can't be looked up the way FanDuel's can. What is public
+# is the post page's preview image (its og:image, for link previews in messages): a picture of the slip's top, with the
+# price, the stake, the payout, every leg's player, and the first leg in full. That image is read like a screenshot.
+DK_POST = re.compile(r"(?:sportsbook\.draftkings\.com/(?:[a-z]{2}/)?social|dksb://sb/social(?:web)?)/post/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
+DK_PAGE = "https://sportsbook.draftkings.com/social/post/{}"
+# the preview image, only from DraftKings' own image path (never a URL the page could point anywhere)
+DK_IMAGE = re.compile(r'<meta\s+property="og:image"\s+content="(https://sportsbook\.draftkings\.com/comments/seo/assets/[A-Za-z0-9._-]+\.png)"', re.I)
+DK_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36",
+              "Accept-Language": "en-US,en;q=0.9"}
+DK_MAX_BYTES = 2 * 1024 * 1024
+DK_BUSY = "DraftKings wouldn't open that link right now. Upload a screenshot of the slip instead."
+
+
+def find_dk_post(text: str) -> Optional[str]:
+    """The post id of the first DraftKings share (Social post) link in the text, or None."""
+    m = DK_POST.search(text or "")
+    return m.group(1).lower() if m else None
+
+
+def dk_preview(post: str, get=None) -> bytes:
+    """The PNG DraftKings shows as the post's link preview. Raises HTTPException when DraftKings won't give it."""
+    get = get or requests.get   # looked up per call, so tests can stand in for DraftKings
+    try:
+        page = get(DK_PAGE.format(post), timeout=10, headers={**DK_HEADERS, "Accept": "text/html"})
+        if page.status_code == 404:
+            raise HTTPException(422, "DraftKings doesn't know that link. Check it's the whole link, or upload a screenshot.")
+        if page.status_code != 200:
+            raise HTTPException(502, DK_BUSY)
+        m = DK_IMAGE.search(page.text)
+        if not m:
+            # a post that's gone, or one DraftKings didn't make a preview for
+            raise HTTPException(422, "DraftKings didn't show that bet in its link. Upload a screenshot of the slip instead.")
+        img = get(m.group(1), timeout=10, headers={**DK_HEADERS, "Accept": "image/png"})
+    except requests.RequestException:
+        raise HTTPException(502, "DraftKings didn't answer. Try again in a minute, or upload a screenshot of the slip.")
+    if img.status_code != 200 or not img.content.startswith(b"\x89PNG") or len(img.content) > DK_MAX_BYTES:
+        raise HTTPException(502, DK_BUSY)
+    return img.content

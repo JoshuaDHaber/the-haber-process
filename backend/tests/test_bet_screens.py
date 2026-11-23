@@ -2,6 +2,7 @@
 limits, and saving a parlay that mixes graded legs with ones the bettor marks. Claude is never called: the reads below are
 what the two sample slips (a bet365 and a FanDuel same-game parlay, CHI @ SEA) say."""
 import base64
+import json
 import re
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -445,3 +446,72 @@ def test_alternate_line_picks_are_found_and_each_names_its_own_player():
     assert [(l["player"], l["kind"], l["side"], l["line"], l["odds"]) for l in slip["legs"]] == [
         ("Brandon Miller", "threes", "Over", 2.5, -146), ("Jaxon Smith-Njigba", "rec", "Over", 89.5, -112)]
     assert slip["share"]["missing"] == 0
+
+
+# ---------- DraftKings share links (a Social post, read from its preview image) ----------
+DK_POST = "2de8c2d5-462d-49fd-b90f-b77db562f5aa"
+DK_IMG = "https://sportsbook.draftkings.com/comments/seo/assets/2e404331-06b0-4666-8908-e0abb9b6badf.639310634467557213.1.png"
+DK_PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+# what Claude reads off the preview: the first leg in full, the rest cut off (names only)
+DK_SLIP = {"sportsbook": "DraftKings", "bet_type": "parlay", "odds": 2800, "stake": 4.0, "bonus_stake": 4.0, "to_return": 112.0,
+           "boost": None, "no_sweat": False, "event": {"teams": [], "starts": None}, "legs": [
+               {"player": "Jaxon Smith-Njigba", "kind": "td", "side": "Over", "line": 0.5, "odds": None, "text": "Jaxon Smith-Njigba Anytime TD Scorer"},
+               {"player": "D'Andre Swift", "kind": "other", "side": "Over", "line": None, "odds": None, "text": "D'Andre Swift"},
+               {"player": "Caleb Williams", "kind": "other", "side": "Over", "line": None, "odds": None, "text": "Caleb Williams"}]}
+
+
+def fake_draftkings(page_status=200, page=None, img_status=200, img=DK_PNG):
+    calls = []
+    page = page if page is not None else f'<head><meta property="og:image" content="{DK_IMG}" /></head>'
+    def get(url, timeout, headers):
+        calls.append(url)
+        if url == DK_IMG:
+            return SimpleNamespace(status_code=img_status, content=img)
+        return SimpleNamespace(status_code=page_status, text=page)
+    get.calls = calls
+    return get
+
+
+def test_a_draftkings_share_link_is_found_in_whatever_text_comes_with_it():
+    assert share_links.find_dk_post(f"[DraftKings Social](https://sportsbook.draftkings.com/social/post/{DK_POST}?slipAdd)") == DK_POST
+    assert share_links.find_dk_post(f"dksb://sb/social/post/{DK_POST.upper()}") == DK_POST
+    assert share_links.find_dk_post(f"https://draftkings.com.evil.example/social/post/{DK_POST}") is None
+    assert share_links.find_dk_post("https://sportsbook.draftkings.com/social/post/not-a-post") is None
+
+
+def test_the_preview_image_comes_only_from_draftkings_own_image_path():
+    get = fake_draftkings()
+    assert share_links.dk_preview(DK_POST, get) == DK_PNG
+    assert get.calls == [f"https://sportsbook.draftkings.com/social/post/{DK_POST}", DK_IMG]
+    elsewhere = '<meta property="og:image" content="https://evil.example/x.png" />'
+    for get, code in [(fake_draftkings(page=elsewhere), 422), (fake_draftkings(page="<head></head>"), 422),
+                      (fake_draftkings(page_status=404), 422), (fake_draftkings(page_status=403), 502),
+                      (fake_draftkings(img=b"<html>Access Denied</html>"), 502), (fake_draftkings(img_status=403), 502)]:
+        with pytest.raises(share_links.HTTPException) as e:
+            share_links.dk_preview(DK_POST, get)
+        assert e.value.status_code == code and "screenshot" in e.value.detail
+        assert not any("evil" in u for u in get.calls)
+
+
+def test_the_text_endpoint_reads_a_draftkings_link_and_names_the_legs_it_cut_off(sent, monkeypatch):
+    seen = {}
+    def read(media, data, prompt="Read this bet slip."):
+        seen.update(media=media, data=data, prompt=prompt)
+        return json.loads(json.dumps(DK_SLIP))
+    monkeypatch.setattr(bet_screens, "read_slip", read)
+    monkeypatch.setattr(share_links.requests, "get", fake_draftkings())
+    text = f"https://sportsbook.draftkings.com/social/post/{DK_POST}?slipAdd"
+    with member(sent, "dk-link@example.com", "198.51.100.36") as c:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        r = c.post("/api/me/bets/read-slip-text", json={"text": text})
+        assert r.status_code == 422 and "screenshot" in r.json()["detail"]
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        bet_screens._reads.clear()
+        d = c.post("/api/me/bets/read-slip-text", json={"text": text}).json()
+    assert seen["media"] == "image/png" and base64.b64decode(seen["data"]) == DK_PNG and "cut off" in seen["prompt"]
+    assert (d["book"], d["kind"], d["odds"], d["stake"], d["bonus_stake"]) == ("DraftKings", "parlay", 2800, 4.0, 4.0)
+    assert [(l["graded"], l["text"]) for l in d["legs"]] == [
+        (True, "Jaxon Smith-Njigba Anytime TD Scorer"), (False, "D'Andre Swift"), (False, "Caleb Williams")]
+    assert "D'Andre Swift and Caleb Williams came in as just names" in d["notes"][0]
+    assert not any("You mark it" in n for n in d["notes"]) and any("bonus bet" in n for n in d["notes"])
+    assert len(bet_screens._reads[next(iter(bet_screens._reads))]) == 1   # counts as one of the day's reads
