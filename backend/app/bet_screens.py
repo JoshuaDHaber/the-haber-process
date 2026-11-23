@@ -103,6 +103,7 @@ class ScreenDraft(BaseModel):
     bonus_stake: Optional[float] = None
     to_return: Optional[float] = None
     boost: Optional[int] = None       # a profit boost, in percent, on top of `odds`
+    boost_cap: Optional[float] = None  # the most of the stake the boost covers ("boosted up to max $10 wager")
     no_sweat: bool = False            # the stake comes back as a bonus bet if it loses
     legs: list[ScreenLeg]
     notes: list[str]                  # what the bettor should check before saving
@@ -205,6 +206,9 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
         elif league and name:
             pool = pools.setdefault(league, upcoming_players(db, league, now) + recent_players(db, league, now))
             found = [p for p in pool if _norm(p["name"]) == _norm(name) and kind in p["kinds"]]
+            if not found:   # a reader's split or joined name: "Ja Marr Chase" / "JaMarr Chase" for Ja'Marr Chase
+                bare = _norm(name).replace(" ", "")
+                found = [p for p in pool if kind in p["kinds"] and _norm(p["name"]).replace(" ", "") == bare]
             if not found:
                 # the book's full first name and the board's short one, or the other way ("Chigoziem" / "Chig Okonkwo"): only
                 # when the surname is the same and it's the one such player
@@ -240,6 +244,12 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
         notes.append(f"Includes a {slip['boost']:g}% boost: the odds here are worked out from what the slip says it returns.")
     elif boost:
         notes.append(f"Profit boost is set to {boost}%: the odds are the price before it.")
+    cap = slip.get("boost_cap") if boost and slip.get("boost_cap") and (not slip.get("stake") or slip["boost_cap"] < slip["stake"]) else None
+    if cap:
+        notes.append(f"The boost covers only the first ${cap:.2f} of the stake, as the slip says: the rest pays the plain price.")
+    if slip.get("fee"):
+        notes.append(f"The slip adds a ${slip['fee']:.2f} fee (bet protection). It isn't part of the stake here, so your profit "
+                     "doesn't count it.")
     no_sweat = bool(slip.get("no_sweat")) and not slip.get("bonus_stake") and not boost
     if no_sweat:
         notes.append("No sweat is set: if it loses, My bets shows the stake coming back as a bonus bet.")
@@ -249,7 +259,8 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
         notes.append("The slip didn't show the stake: enter it before saving.")
     return ScreenDraft(book=slip.get("sportsbook"), league=max(set(league_votes), key=league_votes.count) if league_votes else None,
                        kind="parlay" if len(legs) > 1 else "single", odds=slip.get("odds"), stake=slip.get("stake"),
-                       bonus_stake=slip.get("bonus_stake"), to_return=slip.get("to_return"), boost=boost, no_sweat=no_sweat, legs=legs, notes=notes)
+                       bonus_stake=slip.get("bonus_stake"), to_return=slip.get("to_return"), boost=boost, boost_cap=cap, no_sweat=no_sweat,
+                       legs=legs, notes=notes)
 
 
 @router.post("/bets/read-screenshot", response_model=ScreenDraft, dependencies=[Depends(auth.same_origin)])

@@ -26,6 +26,8 @@ export interface TrackedBet {
   bonus: boolean;
   /** A profit boost, in percent: `odds` is the price before it, and `to_pay` and `payout` include it. */
   boost: number | null;
+  /** The most of the stake the boost covers ("boosted up to max $10 wager"); null: all of it. */
+  boost_cap: number | null;
   /** A no-sweat bet: what the book refunds as a bonus bet if it loses (at most the stake), and what a lost one earned back. */
   no_sweat: number | null; refund: number;
   /** An early-win token on a single moneyline: the lead (points) that pays it as a win, whatever the final score. */
@@ -118,17 +120,18 @@ export const winReturn = (stake: number, winnings: number, bonus: boolean) => (b
 export type PromoKind = "none" | "bonus" | "boost" | "no_sweat" | "early_win";
 /** The promo as a form holds it: the boost's percent, the no-sweat refund (blank: the whole stake) and the early win's lead,
  *  as typed. */
-export interface Promo { kind: PromoKind; boost: string; refund: string; lead: string }
-export const NO_PROMO: Promo = { kind: "none", boost: "", refund: "", lead: "" };
+export interface Promo { kind: PromoKind; boost: string; refund: string; lead: string; /** the most of the stake a boost covers, as typed (blank: all of it) */ cap: string }
+export const NO_PROMO: Promo = { kind: "none", boost: "", refund: "", lead: "", cap: "" };
 /** FanDuel's early-win tokens: a moneyline pays once the team is up 10 (NBA) or 17 (NFL). The most a lead can be: backend
  *  bets.MAX_EARLY_WIN. */
 export const EARLY_WIN: Record<"nfl" | "nba", number> = { nba: 10, nfl: 17 };
 export const MAX_EARLY_WIN = 40;
 /** What a profit boost runs to (backend bets.MAX_BOOST). */
 export const MAX_BOOST = 500;
-export const promoOf = (b: Pick<TrackedBet, "bonus" | "boost" | "no_sweat" | "stake" | "early_win">): Promo => ({
+export const promoOf = (b: Pick<TrackedBet, "bonus" | "boost" | "no_sweat" | "stake" | "early_win"> & { boost_cap?: number | null }): Promo => ({
   kind: b.bonus ? "bonus" : b.boost ? "boost" : b.no_sweat ? "no_sweat" : b.early_win ? "early_win" : "none",
   boost: b.boost ? String(b.boost) : "", refund: b.no_sweat && b.no_sweat < b.stake ? String(b.no_sweat) : "",
+  cap: b.boost && b.boost_cap ? String(b.boost_cap) : "",
   lead: b.early_win ? String(b.early_win) : "" });
 /** The early win's lead typed, as whole points from 1 to MAX_EARLY_WIN; null if it isn't one. */
 export function leadOf(p: Promo): number | null {
@@ -147,16 +150,26 @@ export function refundOf(p: Promo, stake: number): number | null {
   const n = Number(p.refund.replace(/[$,\s]/g, ""));
   return Number.isFinite(n) && n > 0 ? Math.min(n, stake || n) : null;
 }
-/** The form's promo is complete: a boost needs its percent, a no-sweat refund a dollar amount (or blank). */
+/** The boost's cap typed, in dollars; null when it's blank (the whole stake) or isn't an amount. */
+export function capOf(p: Promo): number | null {
+  if (p.kind !== "boost" || !p.cap.trim()) return null;
+  const n = Number(p.cap.replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+/** The share of the stake a boost lifts: all of it, or the cap's part. */
+export const boostShare = (p: Promo, stake: number) => { const c = capOf(p); return c && stake > 0 ? Math.min(c, stake) / stake : 1; };
+/** The form's promo is complete: a boost needs its percent (and a cap, if typed, an amount), a no-sweat refund a dollar amount (or blank). */
 export const promoReady = (p: Promo, stake: number) =>
-  p.kind === "boost" ? boostPct(p) != null : p.kind === "no_sweat" ? !p.refund.trim() || refundOf(p, stake) != null
+  p.kind === "boost" ? boostPct(p) != null && (!p.cap.trim() || capOf(p) != null) : p.kind === "no_sweat" ? !p.refund.trim() || refundOf(p, stake) != null
     : p.kind === "early_win" ? leadOf(p) != null : true;
 /** The promo as the server takes it: every field, so switching promos takes the old one off (0 is none). */
-export interface PromoBody { bonus: boolean; boost?: number; no_sweat?: number; early_win?: number }
+export interface PromoBody { bonus: boolean; boost?: number; boost_cap?: number; no_sweat?: number; early_win?: number }
 export const promoBody = (p: Promo, stake: number): PromoBody =>
-  ({ bonus: p.kind === "bonus", boost: boostPct(p) ?? 0, no_sweat: refundOf(p, stake) ?? 0, early_win: leadOf(p) ?? 0 });
-/** If it wins, what the book pays back with the promo: a boost multiplies the winnings, a bonus bet's stake isn't returned. */
-export const promoReturn = (stake: number, winnings: number, p: Promo) => winReturn(stake, winnings * (1 + (boostPct(p) ?? 0) / 100), p.kind === "bonus");
+  ({ bonus: p.kind === "bonus", boost: boostPct(p) ?? 0, boost_cap: capOf(p) ?? 0, no_sweat: refundOf(p, stake) ?? 0, early_win: leadOf(p) ?? 0 });
+/** If it wins, what the book pays back with the promo: a boost multiplies the winnings (only the cap's share of them, if
+ *  it has one), a bonus bet's stake isn't returned. */
+export const promoReturn = (stake: number, winnings: number, p: Promo) =>
+  winReturn(stake, winnings * (1 + (boostPct(p) ?? 0) / 100 * boostShare(p, stake)), p.kind === "bonus");
 /** What a bet cost the bettor: nothing for a bonus bet. */
 export const costOf = (b: Pick<TrackedBet, "stake" | "bonus">) => (b.bonus ? 0 : b.stake);
 
@@ -201,6 +214,8 @@ export interface ScreenDraft {
   bonus_stake: number | null; to_return: number | null; legs: ScreenLeg[]; notes: string[];
   /** A profit boost on top of `odds`, and whether the slip is a no-sweat bet (only the Claude reader sees these). */
   boost?: number | null; no_sweat?: boolean;
+  /** the most of the stake the boost covers, when the slip says ("boosted up to max $10 wager") */
+  boost_cap?: number | null;
 }
 /** A draft bet from a screenshot (a data URL), to check in the Add a bet sheet; nothing is saved. */
 export const readScreenshot = (image: string) => call<ScreenDraft>("bets/read-screenshot", { method: "POST", body: JSON.stringify({ image }) });

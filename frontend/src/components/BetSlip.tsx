@@ -43,7 +43,7 @@ export default function BetSlip() {
   const [promos, setPromos] = useState<Record<string, Promo>>({});
   const promoFor = (book: string) => promos[book] ?? NO_PROMO;
   // what "Place bet" records for that promo (a boost or refund still being typed counts once it's complete)
-  const bodyFor = (book: string, stake: number): PromoBody => (promoReady(promoFor(book), stake) ? promoBody(promoFor(book), stake) : { bonus: false, boost: 0, no_sweat: 0, early_win: 0 });
+  const bodyFor = (book: string, stake: number): PromoBody => (promoReady(promoFor(book), stake) ? promoBody(promoFor(book), stake) : { bonus: false, boost: 0, boost_cap: 0, no_sweat: 0, early_win: 0 });
   const sameBody = (a: PromoBody, b: PromoBody) => a.bonus === b.bonus && (a.boost ?? 0) === (b.boost ?? 0) && (a.no_sweat ?? 0) === (b.no_sweat ?? 0);
   // what "Place bet" recorded on My bets, per book: `key` is the legs it was for, so clicking Place again (or after tweaking
   // the stake) doesn't record it twice, while a different set of legs is a new bet

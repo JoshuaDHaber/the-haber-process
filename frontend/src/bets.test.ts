@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boostPct, costOf, leadOf, legLeague, NO_PROMO, parseOdds, promoBody, promoOf, promoReady, promoReturn, refundOf, signedMoney, voidableLegs, winReturn, type TrackedBet, type TrackedLeg } from "./bets";
+import { boostPct, costOf, leadOf, legLeague, NO_PROMO, parseOdds, promoBody, promoOf, promoReady, promoReturn, refundOf, signedMoney, type TrackedBet, type TrackedLeg, voidableLegs, winReturn } from "./bets";
 
 describe("bets helpers", () => {
   it("reads American odds typed by hand and refuses anything else", () => {
@@ -59,17 +59,27 @@ describe("promos", () => {
     expect([promoReady(noSweat(""), 0), promoReady(noSweat("abc"), 10)]).toEqual([true, false]);   // blank is the whole stake
   });
   it("send every field, so switching takes the old promo off", () => {
-    expect(promoBody(boost("40"), 10)).toEqual({ bonus: false, boost: 40, no_sweat: 0, early_win: 0 });
-    expect(promoBody(noSweat(""), 25)).toEqual({ bonus: false, boost: 0, no_sweat: 25, early_win: 0 });
-    expect(promoBody(NO_PROMO, 25)).toEqual({ bonus: false, boost: 0, no_sweat: 0, early_win: 0 });
-    expect(promoBody({ ...NO_PROMO, kind: "early_win", lead: "10" }, 25)).toEqual({ bonus: false, boost: 0, no_sweat: 0, early_win: 10 });
+    expect(promoBody(boost("40"), 10)).toEqual({ bonus: false, boost: 40, boost_cap: 0, no_sweat: 0, early_win: 0 });
+    expect(promoBody(noSweat(""), 25)).toEqual({ bonus: false, boost: 0, boost_cap: 0, no_sweat: 25, early_win: 0 });
+    expect(promoBody(NO_PROMO, 25)).toEqual({ bonus: false, boost: 0, boost_cap: 0, no_sweat: 0, early_win: 0 });
+    expect(promoBody({ ...NO_PROMO, kind: "early_win", lead: "10" }, 25)).toEqual({ bonus: false, boost: 0, boost_cap: 0, no_sweat: 0, early_win: 10 });
   });
   it("read back off a tracked bet", () => {
     const b = { bonus: false, boost: null, no_sweat: null, early_win: null, stake: 10 };
-    expect(promoOf({ ...b, boost: 30 })).toEqual({ kind: "boost", boost: "30", refund: "", lead: "" });
-    expect(promoOf({ ...b, no_sweat: 10 })).toEqual({ kind: "no_sweat", boost: "", refund: "", lead: "" });
+    expect(promoOf({ ...b, boost: 30 })).toEqual({ kind: "boost", boost: "30", refund: "", lead: "", cap: "" });
+    expect(promoOf({ ...b, no_sweat: 10 })).toEqual({ kind: "no_sweat", boost: "", refund: "", lead: "", cap: "" });
     expect(promoOf({ ...b, no_sweat: 5 }).refund).toBe("5");
-    expect(promoOf({ ...b, early_win: 10 })).toEqual({ kind: "early_win", boost: "", refund: "", lead: "10" });
+    expect(promoOf({ ...b, early_win: 10 })).toEqual({ kind: "early_win", boost: "", refund: "", lead: "10", cap: "" });
+    expect(promoOf({ ...b, boost: 20, boost_cap: 10 }).cap).toBe("10");
+  });
+  it("a boost capped at part of the stake lifts only that part's winnings", () => {
+    const capped = { ...NO_PROMO, kind: "boost" as const, boost: "20", cap: "10" };
+    // $15 at +445 wins $66.75; 20% on the first $10's share: 66.75 x (1 + 0.2 x 10/15) + 15 = 90.65
+    expect(promoReturn(15, 66.75, capped)).toBeCloseTo(90.65, 2);
+    expect(promoReturn(15, 66.75, { ...capped, cap: "" })).toBeCloseTo(95.10, 2);   // no cap: all of it
+    expect(promoReturn(15, 66.75, { ...capped, cap: "50" })).toBeCloseTo(95.10, 2); // a cap above the stake: all of it
+    expect([promoReady(capped, 15), promoReady({ ...capped, cap: "ten" }, 15)]).toEqual([true, false]);
+    expect(promoBody(capped, 15)).toMatchObject({ boost: 20, boost_cap: 10 });
   });
   it("an early win needs whole points, 1 to 40", () => {
     const ew = (lead: string) => ({ ...NO_PROMO, kind: "early_win" as const, lead });

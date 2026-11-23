@@ -302,6 +302,8 @@ class Bet(Base):
     late: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # a profit boost, in percent (50 = the winnings are 1.5x what the odds pay): `odds` stays the price before the boost
     boost: Mapped[int] = mapped_column(Integer, nullable=True)
+    # the most of the stake a boost covers ("boosted up to max $10 wager"); unset: all of it
+    boost_cap: Mapped[float] = mapped_column(Float, nullable=True)
     # a no-sweat bet: the most the book refunds, as a bonus bet, if it loses (up to the stake)
     no_sweat: Mapped[float] = mapped_column(Float, nullable=True)
     # an early-win token on a moneyline: the lead (points) at which the book pays it as a win, whatever the final score
@@ -546,7 +548,7 @@ def ensure_columns(eng) -> bool:
                                  ("bets", "bonus", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "late", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "boost", "INTEGER"), ("bets", "no_sweat", "FLOAT"),
-                                 ("bets", "early_win", "INTEGER"), ("bet_legs", "lead", "FLOAT"), ("bet_legs", "book_void", "BOOLEAN"),
+                                 ("bets", "early_win", "INTEGER"), ("bets", "boost_cap", "FLOAT"), ("bet_legs", "lead", "FLOAT"), ("bet_legs", "book_void", "BOOLEAN"),
                                  ("bet_legs", "close_p", "FLOAT"), ("bet_legs", "close_at", "TIMESTAMP"), ("bet_legs", "close_books", "INTEGER"),
                                  *((t, c, typ) for t in ("projections", "nba_projections")
                                    for c, typ in (("dvp", "FLOAT"), ("dvp_rank", "INTEGER"), ("dvp_n", "INTEGER"))),

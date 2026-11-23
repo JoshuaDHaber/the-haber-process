@@ -214,9 +214,14 @@ def _draftkings(lines: list[str]) -> list[dict]:
         name = _name(" ".join(name))
         if not name:
             continue
-        # its need: on one of the two lines above (not past another leg's market), else the header's, in order
+        # its need: before the player on the same line (the bet slip before placing: "30+ © | Stefon Diggs Receiving
+        # Yards"), on one of the two lines above (not past another leg's market), else the header's, in order
         need = None
-        for j in (i - 1, i - 2):
+        same = DK_NEED.findall(ln[:at].partition("|")[0]) if "|" in ln[:at] else []
+        if len(same) == 1:
+            plus, side_word, ou_line = same[0]
+            need = f"{plus}+" if plus else f"{'Under' if side_word.lower().startswith('u') else 'Over'} {ou_line}"
+        for j in (i - 1, i - 2) if need is None else ():
             if j < 0 or marked[j] or re.search(r"(?i)parlay|wager|paid", lines[j]) or DK_NEEDS.match(lines[j]):
                 break
             found = DK_NEED.findall(lines[j])
@@ -364,7 +369,15 @@ def parse(text: str) -> dict:
     stake = bonus = to_return = None
     paid: list = []   # the payout's amounts: two when a boost is shown as the old payout struck through, then the new
     money = lambda xs: [float(x.replace(",", "")) for x in xs]   # noqa: E731
+    # the bet slip before placing: "Place Bet $15.00 (+$0.45)", a fee (bet protection) in brackets. Checked first: the
+    # slip's promo text ("Boosted up to max $10 wager") would otherwise read as the stake
+    placed = re.search(r"(?i)place bet\s*\$\s?(\d[\d,]*\.\d{2})(?:\s*\(\+\s?\$\s?(\d+\.\d{2})\))?", text)
+    fee = float(placed.group(2)) if placed and placed.group(2) else None
+    if placed:
+        stake = float(placed.group(1).replace(",", ""))
     for i, ln in enumerate(lines):
+        if placed:
+            break
         if re.search(r"(?i)\b(wager|stake|bet amount)\b", ln):
             here = MONEY.findall(ln)
             amounts = here or (MONEY.findall(lines[i + 1]) if i + 1 < len(lines) else [])
@@ -376,7 +389,7 @@ def parse(text: str) -> dict:
             break
     # the payout on its own line, its amount beside it or on the next line (Apple's reader splits "Net Return" / "$110.82")
     for i, ln in enumerate(lines):
-        if to_return is None and re.fullmatch(r"(?i)\W*(net return|(total )?to return|returns?|payout|potential payout|to win|to pay)\W*(\$.*)?", ln):
+        if to_return is None and re.fullmatch(r"(?i)\W*(net return|(total )?to return|returns?|(total )?payout|potential payout|to win|to pay)\W*(\$.*)?", ln):
             amounts = MONEY.findall(ln) or (MONEY.findall(lines[i + 1]) if i + 1 < len(lines) else [])
             if amounts:
                 paid = money(amounts[:2])
@@ -395,15 +408,20 @@ def parse(text: str) -> dict:
     elif odds is None and stake and to_return and to_return > stake:
         odds = _american(to_return / stake)   # no price shown (a boosted parlay of priced legs): what it pays says it
         from_return = True
-    boost = re.search(r"(\d+(?:\.\d+)?)\s?%[\s|]*(?:parlay |profit |odds )?boost", text, re.I)
+    boost = re.search(r"(\d+(?:\.\d+)?)\s?%[\s|]*(?:parlay |profit |odds |sgp )?boost", text, re.I)
     boost_pct = float(boost.group(1)) if boost else None
+    # a boost on only part of the stake: "Boosted up to max $10 wager", "$10.00 of this Bet is Boosted"
+    cap_m = re.search(r"(?i)boosted up to (?:a )?max(?:imum)?\s*(?:of\s*)?\$\s?(\d+(?:\.\d{2})?)", text) \
+        or re.search(r"(?i)\$\s?(\d+(?:\.\d{2})?) of this bet is boosted", text)
+    boost_cap = float(cap_m.group(1)) if cap_m else None
     if stake and len(paid) == 2 and paid[1] > paid[0] > stake:
         # a boosted payout, the old one struck through ("$48.53 $54.64"): it returns the new one, the price before the boost
         # is what the old one says, and the boost is how much more profit the new one pays
-        pct = round(((paid[1] - stake) / (paid[0] - stake) - 1) * 100)
+        share = min(boost_cap, stake) / stake if boost_cap else 1.0   # a capped boost lifts only that part's winnings
+        pct = round(((paid[1] - stake) / (paid[0] - stake) - 1) * 100 / share)
         if 1 <= pct <= 500:
             to_return, odds, from_return = paid[1], _american(paid[0] / stake), False
             boost_pct = boost_pct or float(pct)
-    return {"boost": boost_pct, "odds_from_return": from_return, "no_sweat": False,
+    return {"boost": boost_pct, "boost_cap": boost_cap if boost_pct else None, "fee": fee, "odds_from_return": from_return, "no_sweat": False,
             "sportsbook": book, "bet_type": "parlay" if len(legs) > 1 else "single", "odds": odds,
             "stake": stake, "bonus_stake": bonus, "to_return": to_return, "event": {"teams": teams, "starts": None}, "legs": legs}

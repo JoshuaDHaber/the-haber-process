@@ -79,8 +79,11 @@ def cost(bet: Bet) -> float:
 
 
 def boosted(bet: Bet, dec: float) -> float:
-    """A decimal price with the bet's profit boost on it: a 50% boost pays 1.5x the winnings, the stake unchanged."""
-    return 1 + (dec - 1) * (1 + (bet.boost or 0) / 100)
+    """A decimal price with the bet's profit boost on it: a 50% boost pays 1.5x the winnings, the stake unchanged. A boost
+    capped at part of the stake ("boosted up to max $10 wager") lifts only that part's winnings, so over the whole stake
+    it's the boost times the share boosted ($10 of $15 at 20%: 13.3%)."""
+    share = min(bet.boost_cap, bet.stake) / bet.stake if bet.boost_cap and bet.stake else 1.0
+    return 1 + (dec - 1) * (1 + (bet.boost or 0) / 100 * share)
 
 
 def returned(bet: Bet, status: str, dec: Optional[float] = None) -> float:
@@ -99,7 +102,8 @@ def refund(bet: Bet) -> float:
     return round(min(bet.no_sweat, bet.stake), 2) if bet.no_sweat and bet.status == "lost" else 0.0
 
 
-def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: Optional[float], early_win: Optional[int] = None) -> None:
+def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: Optional[float], early_win: Optional[int] = None,
+              boost_cap: Optional[float] = None) -> None:
     """Put the bettor's promo on the bet (None leaves that one as it is; a 0 boost, refund or lead takes it off). One per
     bet: a bonus bet, a profit boost, a no-sweat refund or an early-win token (on a single moneyline: check_early_win)."""
     if bonus is not None:
@@ -108,6 +112,12 @@ def set_promo(bet: Bet, bonus: Optional[bool], boost: Optional[int], no_sweat: O
         if boost and not 1 <= boost <= MAX_BOOST:
             raise HTTPException(422, f"A profit boost is 1% to {MAX_BOOST}%")
         bet.boost = boost or None
+    if boost_cap is not None:
+        if boost_cap < 0:
+            raise HTTPException(422, "Enter the most of the wager the boost covers, in dollars")
+        bet.boost_cap = round(boost_cap, 2) or None   # 0: the whole stake
+    if not bet.boost:
+        bet.boost_cap = None   # a cap belongs to a boost
     if no_sweat is not None:
         if no_sweat < 0:
             raise HTTPException(422, "Enter the no-sweat refund in dollars")
@@ -411,7 +421,7 @@ def _out(bet: Bet, now: datetime) -> BetOut:
         id=bet.id, league=bet.league, book=bet.book, kind=bet.kind, stake=bet.stake, odds=bet.odds, status=bet.status,
         payout=bet.payout, profit=round(bet.payout - cost(bet), 2) if settled and bet.payout is not None else None,
         to_pay=returned(bet, "won"), settled_by=bet.settled_by, notes=bet.notes, tags=bet.tags or [],
-        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, no_sweat=bet.no_sweat, refund=refund(bet), early_win=bet.early_win, needs_payout=needs_payout(bet),
+        description=bet.description, bonus=bool(bet.bonus), boost=bet.boost, boost_cap=bet.boost_cap, no_sweat=bet.no_sweat, refund=refund(bet), early_win=bet.early_win, needs_payout=needs_payout(bet),
         placed_at=bet.placed_at.isoformat(), settled_at=bet.settled_at.isoformat() if bet.settled_at else None,
         started=min(leg.kickoff for leg in bet.legs) <= now, ev_close=bet_ev_close(bet), late=bool(bet.late),
         legs=[BetLegOut(id=leg.id, game_id=leg.game_id, gameday=leg.gameday, kickoff=leg.kickoff.isoformat(), player_id=leg.player_id,
@@ -470,7 +480,7 @@ def _view(db: Session, user: User, league, book, tag, months, now: datetime) -> 
 
 
 CSV_COLUMNS = ["bet_id", "placed_at", "league", "sportsbook", "type", "stake", "odds", "status", "payout", "profit", "settled_at",
-               "tags", "ev_at_close", "bonus_bet", "profit_boost_pct", "no_sweat_refund", "added_late", "early_win_lead",
+               "tags", "ev_at_close", "bonus_bet", "profit_boost_pct", "boost_max_wager", "no_sweat_refund", "added_late", "early_win_lead",
                "leg_player", "leg_team", "leg_opponent", "leg_game_date", "leg_market", "leg_side", "leg_line",
                "leg_odds", "leg_alt_line", "leg_result", "leg_actual", "leg_close_chance"]
 
@@ -491,7 +501,7 @@ def export_csv(league: Optional[str] = Query(None, pattern="^(nfl|nba|oth)$"), b
         head = [b.id, b.placed_at.isoformat(timespec="seconds"), b.league.upper(), b.book, b.kind, b.stake, b.odds, b.status,
                 b.payout if settled else "", round(b.payout - cost(b), 2) if settled else "",
                 b.settled_at.isoformat(timespec="seconds") if b.settled_at else "", "; ".join(b.tags or []),
-                "" if (e := bet_ev_close(b)) is None else e, "yes" if b.bonus else "", b.boost or "",
+                "" if (e := bet_ev_close(b)) is None else e, "yes" if b.bonus else "", b.boost or "", b.boost_cap or "",
                 refund(b) or "", "yes" if b.late else "", b.early_win or ""]
         for leg in b.legs:
             w.writerow([*head, leg.name, leg.team, leg.opp, leg.gameday, leg.kind, leg.side, leg.line, leg.odds or "", "yes" if leg.alt else "",
@@ -617,7 +627,7 @@ def _track_custom(body: BetIn, user: User, db: Session, now: datetime) -> BetOut
     bet = Bet(user_id=user.id, league=body.league or "oth", book=body.book.strip()[:40] or "Other", kind=CUSTOM, stake=round(body.stake, 2),
               odds=body.odds, status="open", notes=(body.notes or "").strip()[:500] or None, tags=clean_tags(body.tags),
               description=text, late=starts <= now, placed_at=now)
-    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win, body.boost_cap)
     check_early_win(bet)
     bet.legs.append(BetLeg(game_id=CUSTOM, gameday=starts.date().isoformat(), kickoff=starts, player_id="", name=text[:80], team="",
                            opp="", kind=CUSTOM, side="", line=0.0, odds=body.odds))
@@ -661,7 +671,7 @@ def track(body: BetIn, user: User = Depends(require_member), db: Session = Depen
         raise HTTPException(422, "Describe each leg you'll mark by hand in a few words")
     bet = Bet(user_id=user.id, league=league, book=body.book.strip()[:40], kind=body.kind, stake=round(body.stake, 2), odds=odds,
               status="open", notes=(body.notes or "").strip()[:500] or None, tags=clean_tags(body.tags), placed_at=now)
-    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win, body.boost_cap)
     games = {}
     for leg in graded:
         g = _game(db, league, leg.game_id, leg.player_id, leg.kind)
@@ -708,14 +718,14 @@ def edit(bet_id: int, body: BetPatch, user: User = Depends(require_member), db: 
     if body.tags is not None:
         bet.tags = clean_tags(body.tags)
     had_early = bet.early_win
-    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win)
+    set_promo(bet, body.bonus, body.boost, body.no_sweat, body.early_win, body.boost_cap)
     check_early_win(bet)
     if bet.early_win != had_early and bet.legs[0].result is not None:
         # the token was added, changed or taken off after grading: the next run grades the moneyline again with it
         bet.legs[0].result, bet.legs[0].lead, bet.legs[0].graded_at = None, None, None
     if bet.no_sweat and bet.no_sweat > bet.stake:
         bet.no_sweat = bet.stake   # the stake came down below the refund: a book refunds at most the stake
-    promo = body.bonus is not None or body.boost is not None
+    promo = body.bonus is not None or body.boost is not None or body.boost_cap is not None
     if body.status == "open":
         bet.settled_by = None
     elif body.status is not None:

@@ -720,6 +720,7 @@ class BetIn(BaseModel):
     league: Optional[Literal["nfl", "nba", "oth"]] = None
     bonus: bool = False              # placed with a bonus bet: not the bettor's money, and a win pays only the profit
     boost: Optional[int] = None      # a profit boost, in percent: the winnings are (1 + boost/100) x what the odds pay
+    boost_cap: Optional[float] = None  # the most of the stake the boost covers, in dollars (unset: all of it)
     no_sweat: Optional[float] = None # a no-sweat bet: the most the book refunds as a bonus bet if it loses (up to the stake)
     early_win: Optional[int] = None  # an early-win token on a single moneyline: pays as a win once the team leads by this many
 
@@ -745,6 +746,7 @@ class BetPatch(BaseModel):
     tags: Optional[list[str]] = None
     bonus: Optional[bool] = None
     boost: Optional[int] = None      # 0 takes the boost off
+    boost_cap: Optional[float] = None  # 0: the boost covers the whole stake
     no_sweat: Optional[float] = None # 0 takes the no-sweat refund off
     early_win: Optional[int] = None  # 0 takes the early-win token off
     payout: Optional[float] = None   # with status "won": what the book actually paid back (default: worked out from the odds)
@@ -799,6 +801,7 @@ class BetOut(BaseModel):
     bonus: bool = False              # a bonus bet: profit = payout, and it adds nothing to what was staked
     late: bool = False               # added after its first game started
     boost: Optional[int] = None      # a profit boost, in percent (to_pay and payout include it)
+    boost_cap: Optional[float] = None  # the most of the stake the boost covers (to_pay and payout account for it)
     no_sweat: Optional[float] = None # a no-sweat bet's refund if it loses, as a bonus bet (at most the stake)
     refund: float = 0.0              # what a lost no-sweat bet earned back in bonus bets
     early_win: Optional[int] = None  # an early-win token: the lead that pays the moneyline as a win
