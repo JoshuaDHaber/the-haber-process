@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -266,10 +266,24 @@ def _count_read(user: User) -> None:
     _reads[user.id] = recent + [now]
 
 
+def _name_only_note(slip: dict, draft: ScreenDraft) -> ScreenDraft:
+    """Legs read as just a player's name (DraftKings' card, cut off in a share link's preview) named in one note at the top."""
+    cut = [leg.get("player") for leg in slip.get("legs") or []
+           if leg.get("kind") == "other" and leg.get("line") is None and (leg.get("text") or "").strip() == (leg.get("player") or "").strip()]
+    if cut:
+        names = cut[0] if len(cut) == 1 else ", ".join(cut[:-1]) + " and " + cut[-1]
+        if sum(not leg.graded for leg in draft.legs) == len(cut):   # the name-only legs are the only ones in words: said here instead
+            draft.notes = [n for n in draft.notes if "You mark it" not in n]
+        draft.notes.insert(0, f"DraftKings' picture doesn't show the market for {names}, so {'that leg' if len(cut) == 1 else 'those legs'} "
+                              f"came in as just {'a name' if len(cut) == 1 else 'names'}. Remove {'it' if len(cut) == 1 else 'each'} and add "
+                              f"{'it' if len(cut) == 1 else 'them'} again with the market and line, or upload a screenshot of the whole slip.")
+    return draft
+
+
 def _dk_draft(post: str, user: User, db: Session, now: datetime) -> ScreenDraft:
     """A DraftKings share link's bet as a draft, read from the post's preview image (share_links.dk_preview). The preview
     stops after the first leg, so later legs come back as their player's name only, for the bettor to finish."""
-    if not available():
+    if not available():   # the browser reads the preview itself instead (GET bets/dk-preview, then OCR and read-slip-text)
         raise HTTPException(422, "This site can't read DraftKings links yet. Upload a screenshot of the slip instead.")
     _count_read(user)
     png = share_links.dk_preview(post)
@@ -280,18 +294,7 @@ def _dk_draft(post: str, user: User, db: Session, now: datetime) -> ScreenDraft:
             raise HTTPException(502, "Couldn't read that DraftKings link right now. Try again, or upload a screenshot of the slip.")
         raise
     slip["sportsbook"] = slip.get("sportsbook") or "DraftKings"
-    # a leg the preview cut off: just its player's name, kept as words until the bettor fills it in
-    cut = [leg.get("player") for leg in slip.get("legs") or []
-           if leg.get("kind") == "other" and leg.get("line") is None and (leg.get("text") or "").strip() == (leg.get("player") or "").strip()]
-    draft = to_draft(slip, db, now)
-    if cut:
-        names = cut[0] if len(cut) == 1 else ", ".join(cut[:-1]) + " and " + cut[-1]
-        if sum(not leg.graded for leg in draft.legs) == len(cut):   # the cut legs are the only ones in words: said here instead
-            draft.notes = [n for n in draft.notes if "You mark it" not in n]
-        draft.notes.insert(0, f"DraftKings' link only shows the first leg in full, so {names} came in as just "
-                              f"{'a name' if len(cut) == 1 else 'names'}. Remove {'it' if len(cut) == 1 else 'each'} and add "
-                              f"{'it' if len(cut) == 1 else 'them'} again with the market and line, or upload a screenshot of the whole slip.")
-    return draft
+    return _name_only_note(slip, to_draft(slip, db, now))
 
 
 def _share_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
@@ -332,8 +335,18 @@ def read_slip_text(body: SlipTextIn, user: User = Depends(require_member), db: S
     shared = share_links.read(body.text, db, now)
     if shared is not None:
         return _share_draft(shared, db, now)
-    draft = to_draft(slip_text.parse(body.text), db, now)
+    slip = slip_text.parse(body.text)
+    draft = _name_only_note(slip, to_draft(slip, db, now))
     if not draft.legs:
         draft.notes = ["Couldn't find the bet's legs in that screenshot. Reading works with bet365, FanDuel, DraftKings and Fanatics slips; for "
                        "others, add the bet by hand."]
     return draft
+
+
+@router.get("/bets/dk-preview/{post}")
+def dk_preview(post: str, user: User = Depends(require_member)):
+    """A DraftKings share link's preview image, for the bettor's browser to read with OCR when Claude isn't set up here."""
+    post = share_links.find_dk_post(f"dksb://sb/social/post/{post}")
+    if not post:
+        raise HTTPException(422, "That isn't a DraftKings share link.")
+    return Response(share_links.dk_preview(post), media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})

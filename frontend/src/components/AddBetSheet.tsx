@@ -3,7 +3,7 @@ import { IconPhoto, IconPlus, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Kind } from "../api";
 import { useAuth } from "../auth";
-import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
+import { addCustomBet, addPropBet, COMMON_BOOKS, LATE_DAYS, findBetPlayers, legLeague, money, myBets, NO_PROMO, parseOdds, promoBody, promoReady, promoReturn, dkPost, readDkLinkOnDevice, readScreenshot, readSlipOnDevice, readSlipText, screenshotDataUrl,
   type BetPlayer, type ManualLeg, type ScreenDraft } from "../bets";
 import { isYesNo, KIND_LABEL, namesItself, americanOdds, playLabel } from "../format";
 import { toAmerican, toDecimal, toWin } from "../slip";
@@ -179,7 +179,9 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
   const upload = async (f: File | string | undefined) => {
     if (!f) return;
     setReading(true); setProblem(""); setNotes([]);
-    try { apply(typeof f === "string" ? await readSlipText(f) : claude ? await readScreenshot(await screenshotDataUrl(f)) : await readSlipOnDevice(f)); }
+    // a DraftKings link without Claude: its preview picture is read here with OCR, like a screenshot
+    const post = typeof f === "string" && !claude ? dkPost(f) : null;
+    try { apply(post ? await readDkLinkOnDevice(post) : typeof f === "string" ? await readSlipText(f) : claude ? await readScreenshot(await screenshotDataUrl(f)) : await readSlipOnDevice(f)); }
     catch (err) { setProblem((err as Error).message); }
     finally { setReading(false); if (file.current) file.current.value = ""; }
   };

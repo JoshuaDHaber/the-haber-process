@@ -314,6 +314,31 @@ def test_a_draftkings_main_line_and_a_market_the_site_doesnt_project():
         ("Jalen Brunson", "pts", "Over", 24.5), ("Josh Hart", "other", "Over", 5.5)]
 
 
+def test_a_draftkings_bet_card_reads_each_leg_by_the_names_its_header_lists():
+    """DraftKings' bet card (its My Bets, and a share link's post): each leg is the player over the market, with a jersey
+    icon before the name that OCR garbles ("0 "1 " Lf Chase"). The header lists every player cleanly, so legs are matched
+    to it. Tesseract.js's reading of the card from the reported share link (CIN @ WAS)."""
+    s = slip_text.parse(slip("draftkings-card"))
+    assert (s["sportsbook"], s["bet_type"], s["odds"], s["stake"], s["to_return"]) == ("DraftKings", "parlay", 2800, 4.0, 112.0)
+    assert [(l["player"], l["kind"], l["side"], l["line"]) for l in s["legs"]] == [
+        ("Ja'Marr Chase", "td", "Over", 0.5), ("Mike Gesicki", "td", "Over", 0.5), ("Tee Higgins", "td", "Over", 0.5), ("Stefon Diggs", "td", "Over", 0.5)]
+    assert s["legs"][0]["text"] == "Ja'Marr Chase Anytime TD Scorer"
+
+
+def test_a_share_links_cut_off_preview_gives_the_first_leg_and_the_rest_by_name():
+    """The link's preview as the browser reads it (3x, dark text on white: bets.ts readDkLinkOnDevice): the header, the stake
+    and bonus bet, and the first leg before the picture fades out. The rest come back as their players' names; the note
+    names them."""
+    s = slip_text.parse(slip("draftkings-preview"))
+    assert (s["sportsbook"], s["odds"], s["stake"], s["bonus_stake"], s["to_return"]) == ("DraftKings", 2800, 4.0, 4.0, 112.0)
+    assert [(l["player"], l["kind"], l["line"]) for l in s["legs"]] == [
+        ("Ja'Marr Chase", "td", 0.5), ("Mike Gesicki", "other", None), ("Tee Higgins", "other", None), ("Stefon Diggs", "other", None)]
+    with SessionLocal() as db:
+        d = bet_screens._name_only_note(s, bet_screens.to_draft(s, db, datetime.utcnow()))
+    assert "market for Mike Gesicki, Tee Higgins and Stefon Diggs" in d.notes[0]
+    assert any("bonus bet" in n for n in d.notes)
+
+
 @pytest.mark.parametrize("reader", ["", "-apple"])
 def test_a_14_leg_fanduel_parlay_reads_every_leg(reader):
     s = slip_text.parse(slip("fanduel-14" + reader))
@@ -512,6 +537,16 @@ def test_the_text_endpoint_reads_a_draftkings_link_and_names_the_legs_it_cut_off
     assert (d["book"], d["kind"], d["odds"], d["stake"], d["bonus_stake"]) == ("DraftKings", "parlay", 2800, 4.0, 4.0)
     assert [(l["graded"], l["text"]) for l in d["legs"]] == [
         (True, "Jaxon Smith-Njigba Anytime TD Scorer"), (False, "D'Andre Swift"), (False, "Caleb Williams")]
-    assert "D'Andre Swift and Caleb Williams came in as just names" in d["notes"][0]
+    assert "doesn't show the market for D'Andre Swift and Caleb Williams" in d["notes"][0]
     assert not any("You mark it" in n for n in d["notes"]) and any("bonus bet" in n for n in d["notes"])
     assert len(bet_screens._reads[next(iter(bet_screens._reads))]) == 1   # counts as one of the day's reads
+
+
+def test_the_preview_image_is_handed_to_the_browser_for_ocr_when_claude_isnt_set_up(sent, monkeypatch):
+    monkeypatch.setattr(share_links.requests, "get", fake_draftkings())
+    with member(sent, "dk-ocr@example.com", "198.51.100.37") as c:
+        r = c.get(f"/api/me/bets/dk-preview/{DK_POST}")
+        assert r.status_code == 200 and r.content == DK_PNG and r.headers["content-type"] == "image/png"
+        assert c.get("/api/me/bets/dk-preview/not-a-post").status_code == 422
+    with TestClient(main.app, client=("198.51.100.38", 5000)) as anon:
+        assert anon.get(f"/api/me/bets/dk-preview/{DK_POST}").status_code == 401
