@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import books, config, market_fit, standings
-from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, current_lines
+from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, current_lines, player_quotes
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import odds
@@ -424,9 +424,8 @@ def player_lines(player_id: str, kind: NbaKind, odds_range: int = Query(300, ge=
     with the market's distribution read off the ladder."""
     run = latest_run(db)
     p = _proj(db, run, player_id, kind)
-    main = current_lines(db, NbaOddsLine)
     key = odds.norm(p.name)
-    main = main[(main.market == kind) & (main.player.map(odds.norm) == key) & (main.game_id == p.game_id)].assign(alt=False)
+    main = player_quotes(db, kind, key, p.game_id, NbaOddsLine).assign(alt=False)
     alts = [r for r in db.scalars(select(NbaAltLine).where(NbaAltLine.game_id == p.game_id, NbaAltLine.market == kind).order_by(NbaAltLine.id)).all()
             if odds.norm(r.player) == key]
     alt_df = pd.DataFrame([dict(player=r.player, market=r.market, line=r.line, over_odds=r.over_odds, under_odds=r.under_odds,

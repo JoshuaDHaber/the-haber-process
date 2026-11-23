@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import auth, bet_screens, bets, books, config, grading, slip_sync, market_fit, pipeline, scheduler, standings
-from .db import AltLine, OddsLine, Projection, Run, SessionLocal, SyncRun, current_lines, proj_frame
+from .db import AltLine, OddsLine, Projection, Run, SessionLocal, SyncRun, current_lines, player_quotes, proj_frame
 from .engine import data, early_win, endzone, model, odds
 from .engine import injuries as injm
 from .engine import moneyline as mlm
@@ -646,8 +646,7 @@ def player_history(player_id: str, kind: Kind, db: Session = Depends(get_db)):
 
 def build_ladder_out(db: Session, p: Projection, odds_range: int = 0, market_weight: Optional[float] = None) -> LadderOut:
     key, kind = odds.norm(p.name), p.kind
-    main = current_lines(db)
-    main = main[(main.market == kind) & (main.player.map(odds.norm) == key) & (main.game_id == p.game_id)].assign(alt=False)
+    main = player_quotes(db, kind, key, p.game_id).assign(alt=False)
     alts = db.scalars(select(AltLine).where(AltLine.game_id == p.game_id, AltLine.market == kind).order_by(AltLine.id)).all()
     alt_df = pd.DataFrame([dict(player=r.player, market=r.market, line=r.line, over_odds=r.over_odds,
                                 under_odds=r.under_odds, book=r.book, over_link=r.over_link, under_link=r.under_link,
