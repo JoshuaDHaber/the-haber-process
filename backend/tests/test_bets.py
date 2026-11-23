@@ -568,6 +568,26 @@ def test_an_early_win_moneyline_wins_once_its_team_led_by_enough(sent):
         assert (s.get(Bet, nfl).status, s.get(Bet, nfl).legs[0].lead) == ("won", 17.0)   # HOU is away: up 17, lost by 4
 
 
+def test_a_boost_capped_at_part_of_the_stake_lifts_only_that_part(sent):
+    """DraftKings' "20% SGP Boost, boosted up to max $10 wager" on a $15 stake at +445: $10 returns $10 + $44.50 x 1.2 =
+    $63.40 and the other $5 returns $27.25, so it pays $90.65 (a 20% boost on all of it would pay $95.10)."""
+    with member(sent, "capped@example.com", "198.51.100.45") as c:
+        post = lambda **kw: c.post("/api/me/bets", json={"book": "DraftKings", "kind": "parlay", "stake": 15, "odds": 445,
+                                                         "legs": [leg(), leg("00-W1", "rec", line=54.5)], **kw})
+        b = post(boost=20, boost_cap=10).json()
+        assert (b["boost"], b["boost_cap"], b["to_pay"]) == (20, 10, 90.65)
+        assert post(boost=20).json()["to_pay"] == 95.1                         # uncapped: all $15 boosted
+        assert post(boost=20, boost_cap=50).json()["to_pay"] == 95.1           # a cap above the stake covers all of it
+        assert post(boost=20, boost_cap=-1).status_code == 422
+        r = c.patch(f"/api/me/bets/{b['id']}", json={"status": "won"}).json()
+        assert (r["payout"], r["profit"]) == (90.65, 75.65)
+        r = c.patch(f"/api/me/bets/{b['id']}", json={"boost_cap": 0}).json()   # the cap off: the whole stake boosted again
+        assert (r["boost_cap"], r["payout"]) == (None, 95.1)
+        r = c.patch(f"/api/me/bets/{b['id']}", json={"boost_cap": 10, "boost": 0}).json()   # no boost, no cap
+        assert (r["boost"], r["boost_cap"]) == (None, None)
+        assert "boost_max_wager" in c.get("/api/me/bets.csv").text.splitlines()[0]
+
+
 def test_tags_and_filters(sent):
     with member(sent, "organizer@example.com", "198.51.100.8") as c:
         post = lambda book, legs, **kw: c.post("/api/me/bets", json={"book": book, "kind": "single", "stake": 10, "legs": legs, **kw}).json()

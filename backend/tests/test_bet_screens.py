@@ -302,6 +302,35 @@ def test_the_fanatics_text_reads_each_leg_and_the_boost_from_the_struck_through_
     assert s["legs"][0]["text"] == "Tetairoa McMillan 50+ Receiving Yards"
 
 
+@pytest.mark.parametrize("reader", ["", "-apple"])
+def test_a_draftkings_bet_slip_with_a_boost_on_only_part_of_the_stake(reader):
+    """DraftKings' bet slip before placing: each leg on one line ("30+ | Stefon Diggs Receiving Yards"; Apple's reader
+    splits it), a 20% SGP boost "up to max $10 wager" on a $15 stake ($81.75 struck through, $90.65), the stake only on
+    "Place Bet $15.00 (+$0.45)", the bracket a bet-protection fee. The book is never named."""
+    s = slip_text.parse(slip("draftkings-slip" + reader))
+    assert (s["sportsbook"], s["bet_type"], s["odds"], s["stake"], s["to_return"]) == ("DraftKings", "parlay", 445, 15.0, 90.65)
+    assert (s["boost"], s["boost_cap"], s["fee"]) == (20.0, 10.0, 0.45)
+    assert [(l["kind"], l["line"]) for l in s["legs"]] == [("rec", 29.5), ("pass", 249.5), ("pass", 169.5), ("rec", 19.5),
+                                                           ("recs", 4.5), ("rr", 59.5), ("rec", 24.5), ("rec", 59.5)]
+    assert [l["player"] for l in s["legs"]][:2] == ["Stefon Diggs", "Joe Burrow"]
+
+
+def test_a_capped_boost_and_a_fee_reach_the_draft_and_split_names_still_match(monkeypatch):
+    ko = (datetime.utcnow() + timedelta(hours=3)).isoformat()
+    board = [dict(player_id="00-JC", name="Ja'Marr Chase", pos="WR", team="CIN", opp="WAS", game_id="2026_12_CIN_WAS", kickoff=ko, kinds=["rec"])]
+    monkeypatch.setattr(bet_screens, "upcoming_players", lambda db, league, now: board)
+    monkeypatch.setattr(bet_screens, "recent_players", lambda db, league, now: [])
+    slip = {"sportsbook": "DraftKings", "odds": 445, "stake": 15.0, "to_return": 90.65, "boost": 20.0, "boost_cap": 10.0, "fee": 0.45,
+            "legs": [{"player": "Ja Marr Chase", "kind": "rec", "side": "Over", "line": 59.5, "odds": None, "text": "Ja Marr Chase 60+"}]}
+    with SessionLocal() as s:
+        d = bet_screens.to_draft(slip, s, datetime.utcnow())
+    assert d.legs[0].graded and d.legs[0].player.name == "Ja'Marr Chase"
+    assert (d.boost, d.boost_cap) == (20, 10.0)
+    assert any("first $10.00" in n for n in d.notes) and any("$0.45 fee" in n for n in d.notes)
+    whole = bet_screens.to_draft({**slip, "boost_cap": 25.0}, s, datetime.utcnow())   # a cap above the stake covers it all
+    assert whole.boost_cap is None
+
+
 def test_a_payout_without_a_boost_is_left_alone():
     s = slip_text.parse("Fanatics Sportsbook\nSingle +150\nWager\n$10.00\nPayout\n$25.00\nJosh Allen 250+ -110\nPassing Yards\n")
     assert (s["odds"], s["boost"], s["to_return"]) == (150, None, 25.0)

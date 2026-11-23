@@ -100,7 +100,10 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const what = bet.kind === "custom" ? bet.description ?? "" : bet.legs.map((l) => l.name).join(", ");
   const promoPills = [
     bet.bonus && <span key="b" className="bet-pill" title="Placed with a bonus bet: not counted as money you staked">Bonus bet</span>,
-    bet.boost && <span key="x" className="bet-pill" title={`A ${bet.boost}% profit boost: a win pays ${1 + bet.boost / 100}x the winnings at these odds`}>{bet.boost}% boost</span>,
+    bet.boost && <span key="x" className="bet-pill" title={bet.boost_cap && bet.boost_cap < bet.stake
+      ? `A ${bet.boost}% profit boost on the first ${money(bet.boost_cap)} of the stake: that part's winnings pay ${1 + bet.boost / 100}x, the rest the plain price`
+      : `A ${bet.boost}% profit boost: a win pays ${1 + bet.boost / 100}x the winnings at these odds`}>
+      {bet.boost}% boost{bet.boost_cap && bet.boost_cap < bet.stake ? ` · up to ${money(bet.boost_cap)}` : ""}</span>,
     bet.no_sweat && <span key="n" className="bet-pill" title={`A no-sweat bet: if it loses, ${money(bet.no_sweat)} comes back as a bonus bet`}>No sweat</span>,
     bet.early_win && <span key="e" className="bet-pill" title={`An early-win token: it pays as a win once the team leads by ${bet.early_win}, even if they lose`}>Early win · up {bet.early_win}</span>,
     bet.late && <span key="l" className="bet-pill" title="Added after its game had started, so the result may have been known">Added late</span>,
@@ -172,7 +175,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
         </div>
       ) : (
         <p className="bet-foot mut">
-          {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>{bet.boost && <>, boosted {bet.boost}%</>}
+          {money(bet.stake)}{bet.bonus && " bonus bet"} at <b>{americanOdds(bet.odds)}</b>{bet.boost && <>, boosted {bet.boost}%{bet.boost_cap && bet.boost_cap < bet.stake && <> on the first {money(bet.boost_cap)}</>}</>}
           {bet.needs_payout ? <> → pays less than <b>{money(bet.to_pay)}</b>, with {dropped.length === 1 ? "a leg" : `${dropped.length} legs`} out</>
             : bet.status === "open" ? <> → pays <b>{money(bet.to_pay)}</b>{bet.no_sweat && <>, or <b>{money(bet.no_sweat)}</b> back as a bonus bet if it loses</>}</>
             : bonusBack ? <> → the bonus bet came back</> : bet.payout != null && <> → returned <b>{money(bet.payout)}</b></>}

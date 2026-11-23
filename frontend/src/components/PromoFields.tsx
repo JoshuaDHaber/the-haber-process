@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { boostPct, EARLY_WIN, leadOf, money, MAX_BOOST, MAX_EARLY_WIN, refundOf, type Promo, type PromoKind } from "../bets";
+import { boostPct, capOf, EARLY_WIN, leadOf, money, MAX_BOOST, MAX_EARLY_WIN, refundOf, type Promo, type PromoKind } from "../bets";
 
 const KINDS: [PromoKind, string][] = [["none", "None"], ["bonus", "Bonus bet"], ["boost", "Boost"], ["no_sweat", "No sweat"], ["early_win", "Early win"]];
 
@@ -13,6 +13,8 @@ export default function PromoFields({ promo, onChange, stake, book, moneyline, c
   const from = book ? `from ${book}` : "from the book";
   const boostBad = promo.kind === "boost" && promo.boost.trim() !== "" && boostPct(promo) == null;
   const refundBad = promo.kind === "no_sweat" && promo.refund.trim() !== "" && refundOf(promo, stake) == null;
+  const capBad = promo.kind === "boost" && promo.cap.trim() !== "" && capOf(promo) == null;
+  const capPart = capOf(promo) != null && stake > 0 && capOf(promo)! < stake ? capOf(promo)! : null;
   const leadBad = promo.kind === "early_win" && promo.lead.trim() !== "" && leadOf(promo) == null;
   // the bet stopped being a single moneyline (a leg added): an early win can't stay on it
   useEffect(() => { if (!moneyline && promo.kind === "early_win") onChange({ ...promo, kind: "none" }); }, [moneyline, promo.kind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -32,7 +34,13 @@ export default function PromoFields({ promo, onChange, stake, book, moneyline, c
             <span className="promo-input"><input className="auth-input" inputMode="numeric" autoComplete="off" value={promo.boost} placeholder="50"
               aria-invalid={boostBad} aria-describedby={boostBad ? "promo-boost-err" : undefined} onChange={(e) => onChange({ ...promo, boost: e.target.value })} /><span className="mut">%</span></span>
           </label>
-          {!compact && <p className="mut promo-why">Enter the odds before the boost. A win pays the boosted winnings; the stake comes back as usual.</p>}
+          <label className="auth-label">On up to
+            <span className="promo-input promo-cap"><span className="mut">$</span><input className="auth-input" inputMode="decimal" autoComplete="off" value={promo.cap}
+              placeholder="Whole stake" aria-invalid={capBad} aria-describedby="promo-cap-why" onChange={(e) => onChange({ ...promo, cap: e.target.value })} /></span>
+          </label>
+          {(!compact || capPart != null) && <p className="mut promo-why" id="promo-cap-why" aria-live="polite">
+            {capPart != null ? `Only the first ${money(capPart)} of the ${money(stake)} stake is boosted; the rest pays the plain price.`
+              : "Enter the odds before the boost. A win pays the boosted winnings; the stake comes back as usual. If the boost covers only part of the wager (\"up to max $10\"), put that amount in On up to."}</p>}
         </div>
       )}
       {promo.kind === "no_sweat" && (
@@ -55,6 +63,7 @@ export default function PromoFields({ promo, onChange, stake, book, moneyline, c
       )}
       {promo.kind === "bonus" && !compact && <p className="mut promo-why">A free bet {from}: not counted as money you staked, and a win pays only the winnings.</p>}
       {boostBad && <p className="err" id="promo-boost-err">A profit boost is a whole percent, 1 to {MAX_BOOST}.</p>}
+      {capBad && <p className="err">On up to is a dollar amount, like 10.</p>}
       {leadBad && <p className="err" id="promo-lead-err">An early win's lead is whole points, 1 to {MAX_EARLY_WIN}.</p>}
     </div>
   );

@@ -160,7 +160,7 @@ export default function AddBetSheet({ onClose, defaultLeague, sharedSlip }: { on
     setStake(d.stake ? String(d.stake) : "");   // the slip's, or blank: never the last upload's
     // all of it a bonus bet (part of one is only noted), or a boost or no-sweat bet the reader saw
     setPromo(!!d.stake && !!d.bonus_stake && d.bonus_stake >= d.stake ? { ...NO_PROMO, kind: "bonus" }
-      : d.boost ? { ...NO_PROMO, kind: "boost", boost: String(d.boost) } : d.no_sweat ? { ...NO_PROMO, kind: "no_sweat" } : NO_PROMO);
+      : d.boost ? { ...NO_PROMO, kind: "boost", boost: String(d.boost), cap: d.boost_cap ? String(d.boost_cap) : "" } : d.no_sweat ? { ...NO_PROMO, kind: "no_sweat" } : NO_PROMO);
     setPlayer(null); setQ(""); setProblem("");
     if (!graded.length) {
       // nothing the site grades: an other bet, in the slip's words
