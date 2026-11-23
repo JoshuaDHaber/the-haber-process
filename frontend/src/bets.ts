@@ -247,14 +247,54 @@ function takeSharedText(keep: boolean): string | null {
 /** A slip's text, from either reader, read against the sportsbooks' layouts (backend slip_text) and matched to the board. */
 export const readSlipText = (text: string) =>
   call<ScreenDraft>("bets/read-slip-text", { method: "POST", body: JSON.stringify({ text: text.slice(0, 20000) }) });
-/** The free way, when Claude isn't set up: OCR reads the screenshot on this device (Tesseract.js, loaded only when needed),
+/** The free way, when Claude isn't set up: OCR reads the screenshot or photo on this device (Tesseract.js, loaded only when needed),
  * and only its text goes to the server, which knows bet365's, FanDuel's, DraftKings' and Fanatics' layouts (backend slip_text). */
-export async function readSlipOnDevice(file: Blob): Promise<ScreenDraft> {
+export async function readSlipOnDevice(file: Blob, { prepared = false } = {}): Promise<ScreenDraft> {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
-  let text: string;
-  try { text = (await worker.recognize(file)).data.text; } finally { await worker.terminate(); }
-  return readSlipText(text);
+  try {
+    if (!prepared) {
+      // cleaned up first (a photo of a screen reads far better: glare, reflections, what's beside the phone); the image as
+      // it is if that finds no legs, or the browser can't decode it
+      const clean = await createImageBitmap(file).then(forOcr, () => null);
+      if (clean) {
+        const draft = await readSlipText((await worker.recognize(clean)).data.text);
+        if (draft.legs.length) return draft;
+      }
+    }
+    return await readSlipText((await worker.recognize(file)).data.text);
+  } finally { await worker.terminate(); }
+}
+/** A slip's picture made ready for OCR: grey, about 2000px wide, dark text on white, and each pixel made black or white
+ * against the brightness around it (an adaptive threshold), so uneven light and glare across a photo don't wash text out. */
+export function forOcr(img: ImageBitmap): HTMLCanvasElement {
+  const scale = Math.min(3, 2000 / img.width);
+  const c = document.createElement("canvas");
+  const w = (c.width = Math.round(img.width * scale)), h = (c.height = Math.round(img.height * scale));
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h), d = px.data, grey = new Float32Array(w * h);
+  let total = 0;
+  for (let i = 0; i < w * h; i++) total += grey[i] = 0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2];
+  if (total / (w * h) < 128) for (let i = 0; i < grey.length; i++) grey[i] = 255 - grey[i];   // a dark-mode slip
+  const sums = new Float64Array((w + 1) * (h + 1));   // running totals, so each pixel's neighbourhood mean is four lookups
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) { row += grey[y * w + x]; sums[(y + 1) * (w + 1) + x + 1] = sums[y * (w + 1) + x + 1] + row; }
+  }
+  const r = Math.max(8, Math.round(w * 0.04));
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const mean = (sums[y1 * (w + 1) + x1] - sums[y0 * (w + 1) + x1] - sums[y1 * (w + 1) + x0] + sums[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+      const v = grey[y * w + x] < mean * 0.88 ? 0 : 255, j = 4 * (y * w + x);
+      d[j] = d[j + 1] = d[j + 2] = v; d[j + 3] = 255;
+    }
+  }
+  ctx.putImageData(px, 0, 0);
+  return c;
 }
 /** A DraftKings share link's post id (a DraftKings Social post: backend share_links.find_dk_post), or null. */
 export const dkPost = (text: string) =>
@@ -285,7 +325,7 @@ export async function readDkLinkOnDevice(post: string): Promise<ScreenDraft> {
   }
   ctx.putImageData(px, 0, 0);
   const big = await new Promise<Blob>((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("Couldn't read that DraftKings link."))), "image/png"));
-  return readSlipOnDevice(big);
+  return readSlipOnDevice(big, { prepared: true });   // already prepared for its small, grey text
 }
 
 /** A screenshot as a data URL the server accepts: under 5 MB, re-encoded as JPEG (scaled down if need be) when it's bigger. */

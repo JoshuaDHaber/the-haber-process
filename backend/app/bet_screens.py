@@ -166,6 +166,15 @@ def _norm(name: str) -> str:
     return odds.norm(re.sub(r"\s+(jr|sr|ii|iii|iv)\.?$", "", name.strip(), flags=re.I))
 
 
+def _same_but_short(a: str, b: str) -> bool:
+    """One name is the other with its first name cut short: "Chig Okonkwo" and "Chigoziem Okonkwo", "Cam Ward" and "Cameron Ward"."""
+    a, b = _norm(a).split(), _norm(b).split()
+    if len(a) < 2 or len(b) < 2 or a[1:] != b[1:] or a[0] == b[0]:
+        return False
+    first, other = sorted((a[0], b[0]), key=len)
+    return len(first) >= 3 and other.startswith(first)
+
+
 def _nearest(p: dict, now: datetime) -> tuple:
     """Sort key for a player's (or team's) games: still to start first, soonest first; then started ones, latest first."""
     gap = (datetime.fromisoformat(p["kickoff"]) - now).total_seconds()
@@ -196,6 +205,11 @@ def to_draft(slip: dict, db: Session, now: datetime) -> ScreenDraft:
         elif league and name:
             pool = pools.setdefault(league, upcoming_players(db, league, now) + recent_players(db, league, now))
             found = [p for p in pool if _norm(p["name"]) == _norm(name) and kind in p["kinds"]]
+            if not found:
+                # the book's full first name and the board's short one, or the other way ("Chigoziem" / "Chig Okonkwo"): only
+                # when the surname is the same and it's the one such player
+                short = [p for p in pool if kind in p["kinds"] and _same_but_short(p["name"], name)]
+                found = short if len({p["player_id"] for p in short}) == 1 else []
             # a player with several games: the one whose teams the slip names, else the next one, else the latest played
             found.sort(key=lambda p: (not any(t in team for team in teams for t in (p["team"].lower(), p["opp"].lower())), *_nearest(p, now)))
             match = found[0] if found else None
@@ -274,7 +288,7 @@ def _name_only_note(slip: dict, draft: ScreenDraft) -> ScreenDraft:
         names = cut[0] if len(cut) == 1 else ", ".join(cut[:-1]) + " and " + cut[-1]
         if sum(not leg.graded for leg in draft.legs) == len(cut):   # the name-only legs are the only ones in words: said here instead
             draft.notes = [n for n in draft.notes if "You mark it" not in n]
-        draft.notes.insert(0, f"DraftKings' picture doesn't show the market for {names}, so {'that leg' if len(cut) == 1 else 'those legs'} "
+        draft.notes.insert(0, f"The slip's picture doesn't show the market for {names}, so {'that leg' if len(cut) == 1 else 'those legs'} "
                               f"came in as just {'a name' if len(cut) == 1 else 'names'}. Remove {'it' if len(cut) == 1 else 'each'} and add "
                               f"{'it' if len(cut) == 1 else 'them'} again with the market and line, or upload a screenshot of the whole slip.")
     return draft

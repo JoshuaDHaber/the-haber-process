@@ -314,11 +314,13 @@ def test_a_draftkings_main_line_and_a_market_the_site_doesnt_project():
         ("Jalen Brunson", "pts", "Over", 24.5), ("Josh Hart", "other", "Over", 5.5)]
 
 
-def test_a_draftkings_bet_card_reads_each_leg_by_the_names_its_header_lists():
+@pytest.mark.parametrize("reader", ["", "-cleaned"])
+def test_a_draftkings_bet_card_reads_each_leg_by_the_names_its_header_lists(reader):
     """DraftKings' bet card (its My Bets, and a share link's post): each leg is the player over the market, with a jersey
     icon before the name that OCR garbles ("0 "1 " Lf Chase"). The header lists every player cleanly, so legs are matched
-    to it. Tesseract.js's reading of the card from the reported share link (CIN @ WAS)."""
-    s = slip_text.parse(slip("draftkings-card"))
+    to it. Tesseract.js's reading of the card from the reported share link (CIN @ WAS), as it is and cleaned up first
+    (bets.ts forOcr), which puts Higgins' jersey number between his name and his market."""
+    s = slip_text.parse(slip("draftkings-card" + reader))
     assert (s["sportsbook"], s["bet_type"], s["odds"], s["stake"], s["to_return"]) == ("DraftKings", "parlay", 2800, 4.0, 112.0)
     assert [(l["player"], l["kind"], l["side"], l["line"]) for l in s["legs"]] == [
         ("Ja'Marr Chase", "td", "Over", 0.5), ("Mike Gesicki", "td", "Over", 0.5), ("Tee Higgins", "td", "Over", 0.5), ("Stefon Diggs", "td", "Over", 0.5)]
@@ -337,6 +339,35 @@ def test_a_share_links_cut_off_preview_gives_the_first_leg_and_the_rest_by_name(
         d = bet_screens._name_only_note(s, bet_screens.to_draft(s, db, datetime.utcnow()))
     assert "market for Mike Gesicki, Tee Higgins and Stefon Diggs" in d.notes[0]
     assert any("bonus bet" in n for n in d.notes)
+
+
+def test_a_photo_of_a_draftkings_slip_reads_every_leg_through_glare_and_misspellings():
+    """A phone photo of DraftKings' slip on another screen, with glare and jeans beside it, as the browser reads it
+    (adaptive threshold: bets.ts ocrImage). OCR misspells the market ("RggaiVing Yards"), lowers a first name ("stefon
+    Diggs") and loses two legs' "40+": the header's "100+, 60+, 40+, 40+" fills those in."""
+    s = slip_text.parse(slip("draftkings-photo"))
+    assert (s["sportsbook"], s["odds"], s["stake"], s["bonus_stake"], s["to_return"]) == ("DraftKings", 550, 4.0, 4.0, 22.0)
+    assert [(l["player"], l["kind"], l["line"]) for l in s["legs"]] == [
+        ("Ja'Marr Chase", "rec", 99.5), ("Tee Higgins", "rec", 59.5), ("Stefon Diggs", "rec", 39.5), ("Chigoziem Okonkwo", "rec", 39.5)]
+    assert s["legs"][0]["text"] == "Ja'Marr Chase 100+ Receiving Yards"
+
+
+def test_a_book_writing_a_first_name_in_full_still_finds_the_player():
+    """DraftKings writes "Chigoziem Okonkwo", the board "Chig Okonkwo": a first name cut short matches, the surname must be
+    the same, and a name that isn't one cut short never does."""
+    assert bet_screens._same_but_short("Chig Okonkwo", "Chigoziem Okonkwo") and bet_screens._same_but_short("Cameron Ward", "Cam Ward")
+    assert not bet_screens._same_but_short("Chig Okonkwo", "Chig Smith") and not bet_screens._same_but_short("Jo Jones", "Joe Jones")
+    with SessionLocal() as s:
+        d = bet_screens.to_draft({"legs": [{"player": "Jaxon S Smith-Njigba", "kind": "rec", "side": "Over", "line": 89.5, "odds": None, "text": "x"},
+                                           {"player": "Jax Smith-Njigba", "kind": "rec", "side": "Over", "line": 89.5, "odds": None, "text": "y"}]},
+                                 s, datetime.utcnow())
+    assert [leg.graded for leg in d.legs] == [False, True]
+
+
+def test_a_misspelt_market_is_only_taken_when_its_clearly_one():
+    assert slip_text._dk_market("Tee Higgins Regpiving Yards")[1] == "receiving yards"
+    assert slip_text._dk_market("Josh Allen Pasing Yards")[1] == "passing yards"
+    assert slip_text._dk_market("Tee Higgins Running Late") is None and slip_text._dk_market("Today 8:15 PM") is None
 
 
 @pytest.mark.parametrize("reader", ["", "-apple"])
