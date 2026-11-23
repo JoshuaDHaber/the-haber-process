@@ -100,7 +100,7 @@ export default function NbaGameOverview({ game, books, book, onBook, marketWeigh
         <h2 className="parlay-h">Parlays <small>built from this game only</small></h2>
         {board.loading ? <Skeleton kind="cards" /> : board.failed ? <LoadError compact what="parlays" retry={board.retry} /> :
           <ParlayTiles book={board.book} games={[game]} selectedGames={chosen} parlays={board.parlays}
-            tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={onSelect} />}
+            tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} softParlays={board.softParlays} softLoading={board.softLoading} onSelect={onSelect} />}
       </section>
 
       <section id="go-proj" className="go-sec">

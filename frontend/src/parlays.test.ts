@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Ladder, LadderRow, Pick } from "./api";
-import { bestBook, buildBalancedLadders, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays, THREES_MAX_TILES_PER_PLAYER, THREES_PLAYERS } from "./parlays";
+import { bestBook, buildBalancedLadders, buildSoftMatchupParlays, softTargets, spreadRungs, SOFT_MIN_LEGS, SOFT_MAX_LEGS, SOFT_MIN_ODDS, buildTdParlays, buildThreesLadders, buildLadderParlays, ladderProps, candidates, defaultBook, filterGames, ladderRungs, ladderTargets, parlaysByBook, pickToLeg, priceParlay, recommendParlays, THREES_MAX_TILES_PER_PLAYER, THREES_PLAYERS } from "./parlays";
 import { setLeague } from "./league";
 import { toAmerican, toDecimal } from "./slip";
 
@@ -432,5 +432,88 @@ describe("same-game correlation", () => {
     const pro = { "opp|rush:RB|rush:RB": 0.3 };
     expect(buildLadderParlays(entries, "DraftKings", pro)[0].legs.map((l) => l.player_id).sort()).toEqual(["b", "c"]);
     expect(buildLadderParlays(entries, "DraftKings", corr)[0].legs.map((l) => l.player_id).sort()).toEqual(["a", "c"]);
+  });
+});
+
+describe("soft-matchup parlays", () => {
+  // rank 1-6 of 30 grades A, 7-12 B, 13-18 C, 19+ D/F
+  const soft = (id: string, rank: number, ...quotes: LadderRow[]) =>
+    ({ base: over({ player_id: id, name: id, game_id: `g-${id}`, team: id, dvp_rank: rank, dvp_n: 30 }), ladder: ladder(...quotes) });
+  const plusRungs = () => [rung(40.5, -180, 0.66), rung(50.5, -130, 0.6), rung(60.5, 110, 0.52)];
+
+  it("builds 4-6 leg parlays from A/B matchups, every leg at the price floor or longer", () => {
+    const entries = ["a", "b", "c", "d", "e", "f", "g"].map((id, i) => soft(id, 1 + i, ...plusRungs(), rung(20.5, -350, 0.85)));
+    entries.push(soft("tough", 25, ...plusRungs()));
+    const parlays = buildSoftMatchupParlays(entries, "DraftKings");
+    expect(parlays.map((p) => p.legs.length)).toEqual([4, 5, 6]);
+    for (const p of parlays) {
+      expect(p.title).toContain(`${p.legs.length}-leg`);
+      expect(p.legs.length).toBeGreaterThanOrEqual(SOFT_MIN_LEGS);
+      expect(p.legs.length).toBeLessThanOrEqual(SOFT_MAX_LEGS);
+      expect(p.decimal).toBeGreaterThanOrEqual(4);
+      expect(p.legs.every((l) => l.odds >= SOFT_MIN_ODDS)).toBe(true);
+      expect(p.legs.map((l) => l.player_id)).not.toContain("tough");
+      expect(new Set(p.legs.map((l) => l.player_id)).size).toBe(p.legs.length);
+      expect(p.blurb).toContain("A or B");
+    }
+  });
+
+  it("widens to C matchups when too few A/B players have a usable line, and says so", () => {
+    const entries = [soft("a", 1, ...plusRungs()), soft("b", 8, ...plusRungs()), ...["c", "d", "e", "f"].map((id) => soft(id, 15, ...plusRungs())),
+      soft("tough", 28, ...plusRungs())];
+    const parlays = buildSoftMatchupParlays(entries, "DraftKings");
+    expect(parlays.length).toBeGreaterThan(0);
+    for (const p of parlays) {
+      expect(p.blurb).toContain("C ones are in too");
+      expect(p.legs.map((l) => l.player_id)).not.toContain("tough");
+    }
+  });
+
+  it("builds nothing without enough graded players", () => {
+    expect(buildSoftMatchupParlays([soft("a", 1, ...plusRungs()), soft("b", 2, ...plusRungs()), soft("x", 29, ...plusRungs())], "DraftKings")).toEqual([]);
+  });
+
+  it("targets A/B overs by role size, then C, in the soft markets only", () => {
+    let n = 0;   // every player on his own team, so the per-team cap stays out of it
+    const g = (rank: number) => ({ dvp_rank: rank, dvp_n: 30, team: `T${n++}` });
+    const rows = [
+      // receiving: the starter projects 80, the backup 15 (and is likelier, being a small line)
+      over({ player_id: "wr1", kind: "rec", mu: 80, prob: 0.55, ...g(3) }), over({ player_id: "wr4", kind: "rec", mu: 15, prob: 0.8, ...g(3) }),
+      over({ player_id: "wr2", kind: "rec", mu: 50, prob: 0.6, ...g(15) }),
+      // passing: every QB's yards dwarf a receiver's, so the percentile is what compares them
+      over({ player_id: "qb1", kind: "pass", mu: 280, prob: 0.55, ...g(8) }), over({ player_id: "qb2", kind: "pass", mu: 190, prob: 0.6, ...g(28) }),
+      // a back in two markets is targeted in the one where his role is biggest
+      over({ player_id: "rb", kind: "rush", mu: 40, prob: 0.6, ...g(2) }), over({ player_id: "rb", kind: "rr", mu: 70, prob: 0.58, ...g(2) }),
+      over({ player_id: "rb2", kind: "rush", mu: 70, prob: 0.6, ...g(30) }), over({ player_id: "rb3", kind: "rr", mu: 30, prob: 0.6, ...g(30) }),
+      over({ player_id: "none", kind: "rec", mu: 99, prob: 0.95 }), over({ player_id: "flag", kind: "rec", mu: 90, flagged: true, ...g(1) }),
+      over({ player_id: "td", kind: "td", ...g(1) }),
+    ];
+    const t = softTargets(rows);
+    // percentiles count every over in the market: wr1's 80 is mid-pack behind the ungraded 99 and flagged 90; qb1 and rb top theirs
+    expect(t.map((p) => p.player_id)).toEqual(["rb", "qb1", "wr1", "wr4", "wr2"]);
+    expect(t.find((p) => p.player_id === "rb")?.kind).toBe("rr");
+    expect(softTargets(rows, 2).map((p) => p.player_id)).toEqual(["rb", "qb1"]);   // a full A/B list takes no C players
+  });
+
+  it("caps each team at SOFT_PER_TEAM players", () => {
+    const rows = Array.from({ length: 6 }, (_, i) => over({ player_id: `r${i}`, kind: "rec", mu: 10 * i, dvp_rank: 1, dvp_n: 30 }));
+    expect(softTargets(rows)).toHaveLength(4);
+  });
+
+  it("ranks NBA rebounds by role too, so a starting center beats a guard's small line", () => {
+    setLeague("nba");
+    try {
+      const rows = [over({ player_id: "c", kind: "reb", mu: 11, prob: 0.55, dvp_rank: 4, dvp_n: 30 }),
+        over({ player_id: "g", kind: "reb", mu: 3, prob: 0.75, dvp_rank: 4, dvp_n: 30 }), over({ player_id: "x", kind: "rush", mu: 99, dvp_rank: 1, dvp_n: 30 })];
+      expect(softTargets(rows).map((p) => p.player_id)).toEqual(["c", "g"]);
+    } finally {
+      setLeague("nfl");
+    }
+  });
+
+  it("spreads a player's kept rungs from his shortest line to his longest", () => {
+    const rs = [10, 20, 30, 40, 50, 60, 70].map((line) => over({ line })) as Parameters<typeof spreadRungs>[0];
+    expect(spreadRungs(rs, 3).map((r) => r.line)).toEqual([10, 40, 70]);
+    expect(spreadRungs(rs.slice(0, 2), 3)).toHaveLength(2);
   });
 });

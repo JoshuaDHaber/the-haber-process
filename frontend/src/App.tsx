@@ -255,7 +255,7 @@ function PublicApp() {
       {tab === "hot" && <HotBoard board={hot} weather={weatherByGame} onSelect={(p) => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } })} />}
       {tab === "parlays" && (board.loading ? <Skeleton kind="cards" /> : board.failed ? <LoadError what="parlays" retry={board.retry} /> :
         <ParlayTiles book={board.book} parlayCounts={board.parlayCounts} onBook={board.setBook} games={m.games} selectedGames={chosenGames} onGames={setParlayGames} parlays={board.parlays} tdParlays={board.tdParlays}
-          ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} onSelect={(id, kind, pick) => select({ id, kind, pick })} />)}
+          ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} softParlays={board.softParlays} softLoading={board.softLoading} onSelect={(id, kind, pick) => select({ id, kind, pick })} />)}
       {tab === "promos" && (promo === "endzone"
         ? <EndzoneBoard games={m.games} gameId={endzoneGame} onGame={setEndzoneGame} book={debounced.book} pills={promoPills} nextUpdate={nextUpdate}
           onSelect={(id, p) => select({ id, kind: "td", pick: p ? { side: p.side, line: p.line, book: p.book } : undefined })} />

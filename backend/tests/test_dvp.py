@@ -32,3 +32,18 @@ def test_nba_matchups_rank_each_position_group_against_each_defense():
     m = model.dvp(pd.DataFrame(rows), date(2026, 1, 1), {"g": "G"})
     assert m["pts"][("SOFT", "G")][1] == 1 and m["pts"][("HARD", "G")][1] == 2
     assert m["pra"][("SOFT", "G")][0] > 1 > m["pra"][("HARD", "G")][0]
+
+
+def test_nfl_rush_rec_grade_combines_both_yardages():
+    from app.engine import model as nfl
+    rows = []
+    for i in range(16):   # an RB who runs for 60 and catches for 20 most weeks, and does 50% better against SOFT
+        opp = "SOFT" if i % 2 else "HARD"
+        k = 1.5 if opp == "SOFT" else 1.0
+        rows.append(dict(t=202600 + i + 1, season=2026, player_id="rb", position="RB", opponent_team=opp,
+                         carries=15, rushing_yards=60 * k, targets=3, receiving_yards=20 * k,
+                         attempts=0, passing_yards=0, receptions=2))
+    tab = nfl.dvp_table(pd.DataFrame(rows), 202620)
+    assert tab["rr"][("SOFT", "RB")][1] == 1 and tab["rr"][("HARD", "RB")][1] == 2
+    assert tab["rr"][("SOFT", "RB")][0] > 1 > tab["rr"][("HARD", "RB")][0]
+    assert nfl.dvp_fields(tab, "rr", "SOFT", "RB")["dvp_rank"] == 1

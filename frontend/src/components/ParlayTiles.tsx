@@ -12,6 +12,7 @@ import { Star } from "./icons";
 import Info from "./Info";
 import SidePill from "./SidePill";
 import { PickAvatar } from "./TeamLogo";
+import MatchupGrade from "./MatchupGrade";
 import EmptyState from "./EmptyState";
 import Skeleton from "./Skeleton";
 
@@ -27,6 +28,8 @@ type OnSelect = (id: string, kind: Kind, pick?: DrawerPick) => void;
 const fairOdds = (p: Parlay) => toAmerican(1 / Math.max(p.prob, 1e-6));
 /** "about 1 in 3" */
 const oneIn = (prob: number) => `about 1 in ${Math.max(1, Math.round(1 / Math.max(prob, 1e-6)))}`;
+/** A soft-matchup tile: its legs show their matchup grade, the reason they're there. */
+const isSoft = (p: Parlay) => p.key.startsWith("soft-");
 /** A tile the model expects to lose money on (a same-game parlay is priced by the book, so it has no EV of its own here). */
 const losing = (p: Parlay) => !p.sameGame && p.ev < 0;
 const tileId = (p: Parlay) => `parlay-${p.key}`;
@@ -103,6 +106,7 @@ function ParlayCard({ p, lead, onSelect }: { p: Parlay; lead: boolean; onSelect?
             <PickAvatar name={l.name} kind={l.kind} team={l.team} gameId={l.game_id} />
             <span className="leg-main"><LegName l={l} onSelect={onSelect} /> <SidePill kind={l.kind} side={l.side} line={l.line} />
               {mixedAlt && l.alt && <span className="alt">alt</span>}
+              {isSoft(p) && <MatchupGrade kind={l.kind} pos={l.pos} opp={l.opp} rank={l.dvp_rank} n={l.dvp_n} side={l.side} />}
               <small>{namesItself(l.kind) ? "" : `${KIND_LABEL[l.kind]} · `}{pct(l.prob, 0)} · {l.team} {l.home ? "vs" : "@"} {l.opp}</small></span>
             <span className="leg-odds">{americanOdds(l.odds)}</span>
           </li>
@@ -196,6 +200,8 @@ interface Props {
   /** Omit to hide the game picker (a single game's page builds from that game only). */
   onGames?: (ids: string[]) => void;
   parlays: Parlay[]; tdParlays: Parlay[]; ladders: Parlay[]; altProps: ParlayLeg[]; laddersLoading: boolean;
+  /** Longer-priced parlays of players in soft matchups (parlays.ts buildSoftMatchupParlays), and whether their ladders are still loading. */
+  softParlays: Parlay[]; softLoading: boolean;
   /** Likely-play parlays per book, and a way to switch book, so an empty section can point at a book that has some. */
   parlayCounts?: Record<string, number>;
   onBook?: (b: string) => void;
@@ -217,9 +223,9 @@ const Row = ({ tiles, onSelect, label }: { tiles: Parlay[]; onSelect?: OnSelect;
 };
 
 /** Recommended parlays at one sportsbook: tiles of high-probability plays, then ladder-style tiles, each with the combined odds. */
-export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, parlayCounts, onBook, onSelect }: Props) {
+export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, softParlays, softLoading, parlayCounts, onBook, onSelect }: Props) {
   const nba = getLeague() === "nba";
-  const all = [...parlays, ...tdParlays, ...ladders];
+  const all = [...parlays, ...tdParlays, ...ladders, ...softParlays];
   const likeliest = all.reduce<Parlay | null>((b, p) => (!b || p.prob > b.prob ? p : b), null);
   const rows = ladderRows(ladders, nba);
   return (
@@ -237,6 +243,7 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         { id: "parlays-likely", label: "Likely plays", tiles: parlays },
         { id: "parlays-td", label: "Touchdowns", tiles: nba ? [] : tdParlays },
         { id: "parlays-ladders", label: "Ladders", tiles: ladders },
+        { id: "parlays-soft", label: "Soft matchups", tiles: softParlays },
       ]} />
 
       <h2 className="parlay-h" id="parlays-likely">Likely plays <Info term="likely" /></h2>
@@ -265,6 +272,14 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         : laddersLoading ? <Skeleton kind="tiles" label="Loading alternate lines…" />
         : <EmptyState compact title={`No ladders at ${book ?? "this sportsbook"} between +100 and +300`}>
             Ladders need alternate lines with betslip links. {nba ? "NBA alternate lines come with the day-of props syncs, and not" : "Not"} every book links them, so another book may have some.
+          </EmptyState>}
+
+      <h2 className="parlay-h" id="parlays-soft">Soft matchups <Info term="softMatchup" /></h2>
+      {softParlays.length
+        ? <Row tiles={softParlays} onSelect={onSelect} label="Soft-matchup parlays" />
+        : softLoading ? <Skeleton kind="tiles" label="Loading alternate lines…" />
+        : <EmptyState compact title={`Not enough soft matchups at ${book ?? "this sportsbook"} to build one${selectedGames.length === 1 ? " for this game" : ""}`}>
+            These need at least four players against a defense graded C or softer, each with an over priced -200 or longer that {book ?? "the book"} links to. {selectedGames.length ? "Adding games, or another book, may" : "Another book may"} turn some up.
           </EmptyState>}
 
       {altProps.length > 0 && <>

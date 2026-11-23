@@ -188,7 +188,7 @@ def opp_table(df, upto_t):
     return out
 
 
-DVP_KINDS = ("rush", "rec", "recs", "pass")   # the matchup grades' markets (engine/dvp.py)
+DVP_KINDS = ("rush", "rec", "recs", "pass", "rr")   # the matchup grades' markets (engine/dvp.py)
 DVP_K_ROWS = 12.0      # player-games of par mixed into each defense's factor for a position
 
 
@@ -206,11 +206,11 @@ def dvp_table(df, upto_t):
     frame = pd.DataFrame({"opp": d.opponent_team.to_numpy(), "grp": d.position.map(dvp_group).to_numpy(),
                           "w": np.where(d.season.to_numpy() < upto_t // 100, 0.5, 1.0)})
     for kind in DVP_KINDS:
-        c = CFG[kind]
-        if c["yds"] not in d or c["vol"] not in d:
+        parts = [CFG[k] for k in (("rush", "rec") if kind == "rr" else (kind,))]   # rush + rec: both yardages, either role
+        if any(c["yds"] not in d or c["vol"] not in d for c in parts):
             continue
-        role = d[c["vol"]].fillna(0).to_numpy() > 0
-        yds = d[c["yds"]].where(role)
+        role = sum(d[c["vol"]].fillna(0) for c in parts).to_numpy() > 0
+        yds = (d[parts[0]["yds"]] if len(parts) == 1 else sum(d[c["yds"]].fillna(0) for c in parts)).where(role)
         frame[f"act_{kind}"] = yds.to_numpy()
         frame[f"exp_{kind}"] = d.player_id.map(yds.groupby(d.player_id).mean()).where(role).to_numpy()
     return dvp.ranks(dvp.factors(frame, [k for k in DVP_KINDS if f"act_{k}" in frame], DVP_K_ROWS))
