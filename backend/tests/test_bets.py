@@ -431,6 +431,50 @@ def test_a_voided_legs_missing_price_comes_from_the_books_quote_or_the_bettor_en
         assert c.patch(f"/api/me/bets/{unknown}", json={"status": "won", "payout": -1}).status_code == 422
 
 
+def test_a_leg_the_book_voided_though_he_played_drops_out_and_can_be_handed_back(sent):
+    """Injury protection: the player got hurt and the book voided his leg, but he has a stat line, so grading lost the
+    parlay. Marking the leg voided by the book pays the parlay on the rest; unmarking grades it from that line again."""
+    g = "2098_04_HOU_JAX"
+    bid = tracked([dict(game_id=g, gameday="2098-09-27", player_id="00-A", kind="rush", side="Over", line=59.5, odds=-110),
+                   dict(game_id=g, gameday="2098-09-27", player_id="00-HURT", kind="rush", side="Over", line=49.5, odds=+100),
+                   dict(game_id=g, gameday="2098-09-27", player_id="00-B", kind="rec", side="Under", line=40.5, odds=-110)], odds=+500)
+    single = tracked([dict(game_id=g, gameday="2098-09-27", player_id="00-A", kind="rush", side="Over", line=59.5, odds=-110)], kind="single", odds=-110)
+    stats = pd.DataFrame([dict(player_id="00-A", season=2098, week=4, team="HOU", rushing_yards=80, receiving_yards=0),
+                          dict(player_id="00-HURT", season=2098, week=4, team="HOU", rushing_yards=12, receiving_yards=0),
+                          dict(player_id="00-B", season=2098, week=4, team="JAX", rushing_yards=0, receiving_yards=20)])
+    with SessionLocal() as s:
+        bets.grade_nfl(s, stats, pd.DataFrame([dict(game_id=g, home_score=17)]))
+        assert s.get(Bet, bid).status == "lost"
+    with member(sent, "protected@example.com", "198.51.100.45") as c:
+        with SessionLocal() as s:
+            uid = s.query(User).filter(User.email == "protected@example.com").one().id
+            for b in (bid, single):
+                s.get(Bet, b).user_id = uid
+            hurt, solo = s.get(Bet, bid).legs[1].id, s.get(Bet, single).legs[0].id
+            s.commit()
+        r = c.patch(f"/api/me/bets/{bid}/legs/{hurt}", json={"book_void": True}).json()
+        out = r["legs"][1]
+        assert (out["result"], out["book_void"], out["actual"]) == ("void", True, 12.0)   # his stat line stays
+        assert (r["status"], r["settled_by"]) == ("won", "grading")
+        assert r["payout"] == pytest.approx(10 * 6.0 / 2.0, abs=0.01)   # the +100 leg divided out of +500
+        with SessionLocal() as s:   # the next grading run leaves it alone
+            assert bets.grade_nfl(s, stats, pd.DataFrame([dict(game_id=g, home_score=17)])) == 0
+        r = c.patch(f"/api/me/bets/{bid}/legs/{hurt}", json={"book_void": False}).json()
+        assert (r["legs"][1]["result"], r["legs"][1]["book_void"], r["status"], r["payout"]) == ("loss", False, "lost", 0.0)
+        # settled by hand with the book's payout, then the void undone: that payout no longer applies, so grading takes it back
+        c.patch(f"/api/me/bets/{bid}/legs/{hurt}", json={"book_void": True})
+        assert c.patch(f"/api/me/bets/{bid}", json={"status": "won", "payout": 29.5}).json()["settled_by"] == "user"
+        r = c.patch(f"/api/me/bets/{bid}/legs/{hurt}", json={"book_void": False}).json()
+        assert (r["status"], r["payout"], r["settled_by"]) == ("lost", 0.0, "grading")
+        assert c.patch(f"/api/me/bets/{single}/legs/{solo}", json={"book_void": True}).status_code == 422   # a single: mark the bet void
+        assert c.patch(f"/api/me/bets/{bid}/legs/{solo}", json={"book_void": True}).status_code == 404     # not this bet's leg
+        future = c.post("/api/me/bets", json={"book": "FanDuel", "kind": "parlay", "stake": 10, "odds": 260,
+                                               "legs": [leg(), leg(pid="00-W1")]}).json()
+        assert c.patch(f"/api/me/bets/{future['id']}/legs/{future['legs'][0]['id']}", json={"book_void": True}).status_code == 422
+    with member(sent, "snoop@example.com", "198.51.100.46") as c:
+        assert c.patch(f"/api/me/bets/{bid}/legs/{hurt}", json={"book_void": True}).status_code == 404
+
+
 def test_moneylines_are_tracked_with_props_and_graded_from_the_final_score(sent):
     with member(sent, "mlfan@example.com", "198.51.100.30") as c:
         ml = lambda team, game=NFL_GAME, **kw: dict(game_id=game, player_id=team, kind="ml", side="Over", line=0, odds=-130, **kw)

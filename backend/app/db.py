@@ -338,6 +338,9 @@ class BetLeg(Base):
     close_books: Mapped[int] = mapped_column(Integer, nullable=True)
     graded_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     lead: Mapped[float] = mapped_column(Float, nullable=True)   # a moneyline's team's largest lead in the game (early-win bets)
+    # the bettor marked it voided by the book though the player played (injury protection, a leg the book pulled):
+    # result is "void" and grading leaves it alone; actual keeps his stat line if grading had already run
+    book_void: Mapped[bool] = mapped_column(Boolean, nullable=True)
     bet: Mapped[Bet] = relationship(back_populates="legs")
 
 
@@ -542,7 +545,7 @@ def ensure_columns(eng) -> bool:
                                  ("bets", "bonus", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "late", "BOOLEAN NOT NULL DEFAULT FALSE"),
                                  ("bets", "boost", "INTEGER"), ("bets", "no_sweat", "FLOAT"),
-                                 ("bets", "early_win", "INTEGER"), ("bet_legs", "lead", "FLOAT"),
+                                 ("bets", "early_win", "INTEGER"), ("bet_legs", "lead", "FLOAT"), ("bet_legs", "book_void", "BOOLEAN"),
                                  ("bet_legs", "close_p", "FLOAT"), ("bet_legs", "close_at", "TIMESTAMP"), ("bet_legs", "close_books", "INTEGER"),
                                  *((t, c, typ) for t in ("projections", "nba_projections")
                                    for c, typ in (("dvp", "FLOAT"), ("dvp_rank", "INTEGER"), ("dvp_n", "INTEGER"))),

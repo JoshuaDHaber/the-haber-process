@@ -3,7 +3,7 @@ import { IconCheck, IconDots, IconDownload, IconMinus, IconPlus, IconX } from "@
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth";
-import { costOf, csvUrl, deleteBet, editBet, money, myBets, parseOdds, promoBody, promoOf, promoReady, signedMoney, takeSharedSlip, type BetFilters, type BetStatus, type BetSummary, type TrackedBet, type TrackedLeg } from "../bets";
+import { costOf, csvUrl, deleteBet, editBet, markLeg, voidableLegs, money, myBets, parseOdds, promoBody, promoOf, promoReady, signedMoney, takeSharedSlip, type BetFilters, type BetStatus, type BetSummary, type TrackedBet, type TrackedLeg } from "../bets";
 import { namesItself, KIND_SHORT, americanOdds, pct, signedPct } from "../format";
 import { useLeague } from "../LeagueContext";
 import { leaguePath, goToPath } from "../route";
@@ -30,12 +30,13 @@ const storedView = (): BetFilters => { try { return JSON.parse(localStorage.getI
 function Status({ bet }: { bet: TrackedBet }) {
   // a parlay with legs the bettor marks: once the site's legs are graded, the rest is up to them
   const yours = bet.kind === "custom" || bet.legs.some((l) => l.kind === "custom" && !l.result) && bet.legs.every((l) => l.kind === "custom" || l.result);
-  if (bet.status === "open") return <span className="st">{!bet.started ? "Open" : yours ? "Awaiting your result" : "Awaiting stats"}</span>;
+  // every leg is in but a dropped leg's price isn't known: it waits on the payout the bettor enters, not on stats
+  if (bet.status === "open") return <span className="st">{!bet.started ? "Open" : yours || bet.needs_payout ? "Awaiting your result" : "Awaiting stats"}</span>;
   const cls = bet.status === "won" ? "st st-ok" : bet.status === "lost" ? "st st-error" : "st";
   return <span className={cls}>{STATUS_TEXT[bet.status]}{bet.profit ? ` ${signedMoney(bet.profit)}` : ""}</span>;
 }
 
-function LegRow({ leg, bet }: { leg: TrackedLeg; bet: TrackedBet }) {
+function LegRow({ leg, bet, onUndo, busy }: { leg: TrackedLeg; bet: TrackedBet; onUndo: () => void; busy: boolean }) {
   const [Mark, word] = leg.result ? LEG_MARK[leg.result] : [null, ""];
   // a custom bet: what the bettor wrote, and when its event starts (they mark the result)
   if (leg.kind === "custom") return (
@@ -56,7 +57,9 @@ function LegRow({ leg, bet }: { leg: TrackedLeg; bet: TrackedBet }) {
           {leg.kind === "ml" ? (leg.result === "void" ? " · no result" : leg.actual == null ? "" : leg.actual === 0 ? " · tied" : ` · ${leg.actual > 0 ? "won" : "lost"} by ${Math.abs(leg.actual)}`)
             + (bet.early_win && leg.lead != null && leg.actual != null && leg.actual <= 0
               ? (leg.lead >= bet.early_win ? `, but led by ${leg.lead}: won early` : `, led by ${leg.lead} at most`) : "")
-            : leg.result === "void" ? " · didn't play" : leg.actual != null ? ` · ${leg.actual}` : ""}</span>
+            : leg.book_void ? (leg.actual != null ? ` · ${leg.actual}` : "") : leg.result === "void" ? " · didn't play" : leg.actual != null ? ` · ${leg.actual}` : ""}
+          {leg.book_void && <> · voided by {bet.book} <button type="button" className="link bet-leg-undo" disabled={busy} onClick={onUndo}
+            aria-label={`Undo: ${leg.name} wasn't voided by ${bet.book}`}>Undo</button></>}</span>
       </span>
       <span className="mut">{leg.odds ? americanOdds(leg.odds) : ""}</span>
     </li>
@@ -72,6 +75,8 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const [promo, setPromo] = useState(promoOf(bet));
   const [problem, setProblem] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // picking the parlay leg the book voided though he played (injury protection)
+  const [voiding, setVoiding] = useState(false);
   // a parlay whose voided leg has no known price: what the book paid, as typed
   const [paid, setPaid] = useState("");
   const paidN = Number(paid.replace(/[$,\s]/g, ""));
@@ -83,10 +88,13 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
   const done = () => qc.invalidateQueries({ queryKey: ["my-bets"] });
   const save = useMutation({ mutationFn: (p: Parameters<typeof editBet>[1]) => editBet(bet.id, p), onSuccess: () => { setEditing(false); setProblem(""); done(); },
     onError: (e: Error) => setProblem(e.message) });
+  const leg = useMutation({ mutationFn: ({ id, on }: { id: number; on: boolean }) => markLeg(bet.id, id, on),
+    onSuccess: () => { setVoiding(false); setProblem(""); backToMenu(); done(); }, onError: (e: Error) => setProblem(e.message) });
+  const voidable = voidableLegs(bet);
   const remove = useMutation({ mutationFn: () => deleteBet(bet.id), onSuccess: done, onError: (e: Error) => { setConfirming(false); setProblem(e.message); } });
   const oddsN = parseOdds(odds), stakeN = Number(stake.replace(/[$,\s]/g, ""));
   const title = bet.kind === "parlay" ? `${bet.legs.length}-leg parlay` : bet.kind === "custom" ? "Other bet" : "Single";
-  const startEdit = () => { setConfirming(false); setStake(String(bet.stake)); setOdds(americanOdds(bet.odds)); setTags(bet.tags); setPromo(promoOf(bet)); setEditing(true); };
+  const startEdit = () => { setConfirming(false); setVoiding(false); setStake(String(bet.stake)); setOdds(americanOdds(bet.odds)); setTags(bet.tags); setPromo(promoOf(bet)); setEditing(true); };
   const canSave = stakeN > 0 && !!oddsN && promoReady(promo, stakeN);
   // what a screen reader hears for this card's ⋯ button, so each card's reads differently
   const what = bet.kind === "custom" ? bet.description ?? "" : bet.legs.map((l) => l.name).join(", ");
@@ -111,11 +119,12 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
             {(close) => <>
               <MenuItem onClick={() => { close(); startEdit(); }}>Edit stake, odds, promo and tags</MenuItem>
               {!bet.boost && !bet.no_sweat && <MenuItem onClick={() => { close(); save.mutate({ bonus: !bet.bonus }); }}>{bet.bonus ? "Not a bonus bet" : "Mark as bonus bet"}</MenuItem>}
+              {voidable.length > 0 && <MenuItem onClick={() => { close(); setEditing(false); setConfirming(false); setVoiding(true); }}>A leg was voided by {bet.book}…</MenuItem>}
               {(["won", "lost", "push", "void"] as BetStatus[]).filter((s) => !(bet.settled_by === "user" && bet.status === s)).map((s) => (
                 <MenuItem key={s} onClick={() => { close(); save.mutate({ status: s }); }}>Mark {STATUS_TEXT[s].toLowerCase()}</MenuItem>
               ))}
               {bet.settled_by === "user" && <MenuItem onClick={() => { close(); save.mutate({ status: "open" }); }}>{bet.kind === "custom" ? "Back to open" : "Back to automatic grading"}</MenuItem>}
-              <MenuItem danger onClick={() => { close(); setEditing(false); setConfirming(true); }}>Delete</MenuItem>
+              <MenuItem danger onClick={() => { close(); setEditing(false); setVoiding(false); setConfirming(true); }}>Delete</MenuItem>
             </>}
           </Menu>
         </span>
@@ -124,7 +133,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
         <div className="bet-tags">{promoPills}
           {showTags && bet.tags.map((t) => <button key={t} className="tag-chip" onClick={() => onTag(t)} title={`Show bets tagged ${t}`}>{t}</button>)}</div>
       )}
-      <ul className="bet-legs">{bet.legs.map((l) => <LegRow key={l.id} leg={l} bet={bet} />)}</ul>
+      <ul className="bet-legs">{bet.legs.map((l) => <LegRow key={l.id} leg={l} bet={bet} busy={leg.isPending} onUndo={() => leg.mutate({ id: l.id, on: false })} />)}</ul>
       {editing ? (
         <form className="bet-edit" onSubmit={(e) => { e.preventDefault(); if (canSave) save.mutate({ stake: stakeN, odds: oddsN!, tags, ...promoBody(promo, stakeN) }); }}>
           <div className="bet-edit-row">
@@ -140,6 +149,19 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
             <button type="button" className="link" onClick={() => { setEditing(false); backToMenu(); }}>Cancel</button>
           </div>
         </form>
+      ) : voiding ? (
+        <div className="bet-void-pick" role="group" aria-labelledby={`void-q-${bet.id}`}>
+          <p id={`void-q-${bet.id}`}>Which leg did {bet.book} void? Use this when the book voided a leg though the player played, for injury
+            protection, say. It drops out and the parlay pays on the other legs.</p>
+          <div className="bet-void-legs">
+            {voidable.map((l, i) => (
+              <button key={l.id} type="button" className="chip-btn" autoFocus={i === 0} disabled={leg.isPending} onClick={() => leg.mutate({ id: l.id, on: true })}>
+                <b>{l.name}</b> {l.kind !== "custom" && <SidePill kind={l.kind} side={l.side} line={l.line} />}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="link" onClick={() => { setVoiding(false); backToMenu(); }}>Cancel</button>
+        </div>
       ) : confirming ? (
         <div className="bet-confirm" role="group" aria-label="Delete this bet?">
           <p>Delete this {title.toLowerCase()} at {bet.book}? It comes off your record, and can't be undone.</p>
@@ -173,7 +195,7 @@ function BetCard({ bet, knownTags, onTag }: { bet: TrackedBet; knownTags: string
           </div>
         </form>
       )}
-      {problem && <p className="err">{problem}</p>}
+      {problem && <p className="err" role="alert">{problem}</p>}
     </article>
   );
 }
@@ -373,7 +395,7 @@ export default function MyBets() {
       </>}
       {adding && <AddBetSheet defaultLeague={siteLeague} sharedSlip={shared} onClose={() => { setAdding(false); setShared(undefined); }} />}
       <p className="mut bets-note">NFL bets settle when the week's official stats come out, usually the Tuesday after the games; NBA bets the next
-        morning. A player who didn't play is void, as the books settle it. If your book settled a bet differently, mark it from the bet's menu.</p>
+        morning. A player who didn't play is void, as the books settle it. If your book settled a bet differently, mark it from the bet's menu, including a parlay leg it voided though he played (injury protection).</p>
     </div>
   );
 }
