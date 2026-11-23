@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import threading
 import weakref
 from datetime import datetime
 
@@ -656,7 +657,29 @@ def current_lines(session, table=None):
     return df   # shared between requests: callers filter or copy it, never change it in place
 
 
+def player_quotes(session, market: str, key: str, game_id, table=None):
+    """current_lines' rows for one player (key: odds.norm of the name) in one market and game, in the same order and
+    with the same index as filtering the whole frame. A board visit asks for ~50 players' ladders at once; each used to
+    normalize and mask every line ever fetched (150k+ NBA rows), which took seconds and churned the heap. The lookup is
+    built once per version of the lines."""
+    table = table or OddsLine
+    lines = current_lines(session, table)
+    per_engine = _LINES_CACHE[session.get_bind()]
+    slot = table.__tablename__ + ":by_player"
+    hit = per_engine.get(slot)
+    if not hit or hit[0]() is not lines:
+        with _INDEX_LOCK:   # the ~50 requests arrive together: build it once, not once each
+            hit = per_engine.get(slot)
+            if not hit or hit[0]() is not lines:
+                from .engine import odds
+                groups = lines.groupby([lines.market, lines.player.map(odds.norm), lines.game_id], sort=False).indices
+                hit = per_engine[slot] = (weakref.ref(lines), groups)   # weak: never keeps a replaced frame alive
+    rows = hit[1].get((market, key, game_id))
+    return lines.iloc[rows if rows is not None else []]
+
+
 _LINES_CACHE = weakref.WeakKeyDictionary()   # engine -> {table name: (version, current lines)}
+_INDEX_LOCK = threading.Lock()
 
 
 def clear_lines_cache():
