@@ -15,6 +15,7 @@ import PicksTable from "./components/PicksTable";
 import PlayerCompare from "./components/PlayerCompare";
 import ProjectionsTable from "./components/ProjectionsTable";
 import SoftSpots from "./components/SoftSpots";
+import MarketBoard from "./components/MarketBoard";
 import EndzoneBoard from "./components/EndzoneBoard";
 import TokenBoard from "./components/TokenBoard";
 import { isYesNo, KIND_LABEL, americanOdds, fmtProj, fmtSd, marketLabel, projCaption, matchup, playLabel, signedPct, timeAgo } from "./format";
@@ -48,18 +49,18 @@ import { BASE } from "./env";
 const PlayerDrawer = lazy(() => importOrReload(() => import("./components/PlayerDrawer")));
 const AdminPage = lazy(() => importOrReload(() => import("./components/AdminPage")));
 const NbaApp = lazy(() => importOrReload(() => import("./NbaApp")));
-type Tab = "games" | "picks" | "hot" | "parlays" | "promos" | "injuries" | "spots" | "projections" | "compare" | "model" | "admin" | "account" | "bets";
-const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["promos", "Promos"], ["injuries", "Injuries"], ["spots", "Soft spots"], ["projections", "Projections"],
+type Tab = "games" | "picks" | "hot" | "parlays" | "promos" | "injuries" | "spots" | "market" | "projections" | "compare" | "model" | "admin" | "account" | "bets";
+const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["promos", "Promos"], ["injuries", "Injuries"], ["spots", "Soft spots"], ["market", "Market"], ["projections", "Projections"],
   ["compare", "Compare"], ["model", "Model check"], ["admin", "Admin"]];
 /** Sections under the top bar's More menu. */
-const MORE: Tab[] = ["promos", "injuries", "spots", "compare", "model", "admin"];
+const MORE: Tab[] = ["promos", "injuries", "spots", "market", "compare", "model", "admin"];
 /** Sections only the site owner sees (signed in with an ADMIN_EMAILS account): meta.can_write. */
 const OWNER_ONLY: Tab[] = ["model", "admin"];
 /** Each section's page title (Best props and Parlays add their sportsbook picker). */
-const TITLE: Record<Tab, string> = { games: "This week's games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", promos: "Promos", injuries: "Injury report", spots: "Soft spots", projections: "Projections",
+const TITLE: Record<Tab, string> = { games: "This week's games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", promos: "Promos", injuries: "Injury report", spots: "Soft spots", market: "Prop market", projections: "Projections",
   compare: "Compare players", model: "Model check", admin: "Admin", account: "Preferences", bets: "My bets" };
 /** Each section's path: /props, /parlays, ... (Games is the front page). */
-const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", promos: "promos", injuries: "injuries", spots: "soft-spots", projections: "projections", compare: "compare",
+const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", promos: "promos", injuries: "injuries", spots: "soft-spots", market: "market", projections: "projections", compare: "compare",
   model: "model", admin: "admin", account: "account", bets: "bets" };
 /** The book promotions the Promos page prices, each behind a pill. */
 type Promo = "early-win" | "endzone";
@@ -180,7 +181,7 @@ function PublicApp() {
       onClick: () => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } }),
     }))
     : tab === "hot" ? hotTiles(hot.query.data ?? [], (p) => select({ id: p.player_id, kind: p.kind, pick: { side: p.side, line: p.line, book: p.book } }))
-    : tab === "games" || tab === "parlays" || tab === "promos" || tab === "admin" || tab === "account" || tab === "bets" || tab === "injuries" || tab === "spots" || tab === "compare" ? []
+    : tab === "games" || tab === "parlays" || tab === "promos" || tab === "admin" || tab === "account" || tab === "bets" || tab === "injuries" || tab === "spots" || tab === "market" || tab === "compare" ? []
     : tab === "projections"
       ? (filters.kind === "all" ? (["pass", "rush", "rec", "recs"] as Kind[]).map((k) => (projections.data ?? []).filter((p) => p.kind === k).sort((a, b) => b.mu - a.mu)[0])
         : [...(projections.data ?? [])].sort((a, b) => b.mu - a.mu).slice(0, 3)).filter(Boolean).map((p) => ({
@@ -247,7 +248,7 @@ function PublicApp() {
       <TopTiles tiles={tiles} />
 
       {tab === "games" && <Games games={m.games} nextGames={m.next_games} nextByes={m.next_byes} picks={slatePicks.data ?? []} moneylines={moneylines.data ?? []} injuries={injuries.data} onOpen={openGame} nextUpdate={nextUpdate} />}
-      {tab !== "games" && tab !== "model" && tab !== "parlays" && tab !== "promos" && tab !== "admin" && tab !== "account" && tab !== "bets" && tab !== "injuries" && tab !== "spots" && tab !== "compare" && <Controls filters={filters} onChange={setFilters} games={m.games} showPickControls={tab === "picks"} allMarkets={tab === "hot" ? "All markets" : undefined} />}
+      {tab !== "games" && tab !== "model" && tab !== "parlays" && tab !== "promos" && tab !== "admin" && tab !== "account" && tab !== "bets" && tab !== "injuries" && tab !== "spots" && tab !== "market" && tab !== "compare" && <Controls filters={filters} onChange={setFilters} games={m.games} showPickControls={tab === "picks"} allMarkets={tab === "hot" ? "All markets" : undefined} />}
       {tab === "picks" && !!picks.data?.length && <HowToRead />}
       {(tab === "picks" || tab === "projections") && selectedGame && <GameWeather game={selectedGame} fit={m.weather} />}
 
@@ -266,6 +267,7 @@ function PublicApp() {
       {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> : projections.error && !projections.data ? <LoadError what="projections" retry={projections.refetch} /> :
         <ProjectionsTable rows={projections.data ?? []} busy={projections.isPlaceholderData} weather={weatherByGame} filters={filters} onSelect={(p) => select({ id: p.player_id, kind: p.kind })} />)}
       {tab === "spots" && <SoftSpots league="nfl" onSelect={(id, kind) => select({ id, kind })} />}
+      {tab === "market" && <MarketBoard league="nfl" onSelect={(id, kind) => select({ id, kind })} />}
       {tab === "compare" && <PlayerCompare weather={weatherByGame} onSelect={(id, kind) => select({ id, kind })} />}
       {tab === "model" && <ModelCheck meta={m} />}
       {tab === "model" && <Methodology />}

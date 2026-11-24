@@ -1202,3 +1202,12 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .spot-players { list-style: none; margin: 4px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
 .spot-link { text-align: left; font-size: 13px; padding: 4px 0; min-height: 32px; }
 .spots-more { margin: 12px 0 0; text-align: center; }
+/* Market board (MarketBoard.tsx) */
+.mkt-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.mkt-tile { padding: 10px 12px; border-radius: 16px; display: flex; flex-direction: column; gap: 2px; }
+.mkt-tile b { font-size: 22px; font-variant-numeric: tabular-nums; } .mkt-tile span, .mkt-tile small { font-size: 12px; }
+.mkt-section { margin-top: 18px; } .mkt-section .sub-h { margin-bottom: 8px; }
+.mkt-card { padding: 0; overflow-x: auto; border-radius: 16px; margin-top: 6px; }
+.mkt-card table { font-size: 13px; } .mkt-card th, .mkt-card td { padding: 7px 10px; position: static; } .mkt-card td:first-child { white-space: normal; } .mkt-card td:first-child .link { text-align: left; }
+.mkt-meta, .mkt-steam { display: block; font-size: 11px; font-weight: 400; }
+.mkt-more { margin: 10px 0 0; text-align: center; }

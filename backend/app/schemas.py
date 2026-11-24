@@ -321,6 +321,50 @@ class SoftSpot(BaseModel):
     players: list[SoftSpotPlayer]
 
 
+class MarketMove(BaseModel):
+    game_id: str
+    kind: str
+    player_id: str
+    name: str
+    team: str
+    pos: str
+    line: float                       # the consensus line now
+    books: int
+    p_over: Optional[float] = None    # the books' fair chance of the over at that line, now
+    fetches: int                      # odds fetches that quoted him
+    open_line: Optional[float] = None # the consensus line at the first fetch
+    move: Optional[float] = None      # fair chance of the over at today's line, now minus the first fetch (+ = toward the over)
+    steam: int = 0                    # +1 books moved together toward the over between the last two fetches, -1 the under
+
+
+class MarketOutlier(BaseModel):
+    game_id: str
+    kind: str
+    player_id: str
+    name: str
+    team: str
+    pos: str
+    book: str
+    line: float          # this book's main line
+    consensus: float     # the consensus line
+    side: Literal["Over", "Under"]   # the side the market says is the better buy at this book
+    odds: int
+    fair: float          # the market's fair chance of that side at this book's line
+    ev: float            # return at this price if the market's chance is right
+    books: int
+
+
+class MarketBoard(BaseModel):
+    """The slate's market from stored odds history (market_fit.slate_market): no Odds API calls."""
+    fetches: int = 0
+    first_at: Optional[str] = None
+    last_at: Optional[str] = None
+    movers: int = 0       # lines whose fair over chance moved 4+ points since the first fetch
+    flat: int = 0         # same line, under 1.5 points of movement, over 3+ fetches
+    moves: list[MarketMove]
+    outliers: list[MarketOutlier]
+
+
 class GameLogEntry(BaseModel):
     label: str
     opp: str

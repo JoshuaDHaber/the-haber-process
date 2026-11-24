@@ -198,3 +198,21 @@ def test_nba_refits_a_calibration_curve_and_the_logs_keep_the_raw_chance(monkeyp
     with SessionLocal() as s:
         grading.snapshot_board(s, now=EARLY)
         assert s.query(PickLog).one().p_model == 0.7 and s.query(PickSnap).one().p_model == 0.7
+
+
+def test_slate_market_reads_moves_steam_and_off_consensus_quotes_from_history():
+    history(EARLY, [("Worthy", 45.5, -110, -110, "A"), ("Worthy", 45.5, -110, -110, "B"), ("Worthy", 45.5, -110, -110, "C")])
+    # three books move toward the over together; D hangs 41.5 with a fair under price: 4 yards off a 45.5 consensus
+    history(MORNING, [("Worthy", 45.5, -150, 120, "A"), ("Worthy", 45.5, -150, 120, "B"), ("Worthy", 45.5, -145, 115, "C"),
+                      ("Worthy", 41.5, -110, -110, "D")])
+    proj = pd.DataFrame([dict(name="Worthy", kind="rec", mu=50.0, sd=15.0, game_id=G)])
+    with SessionLocal() as s:
+        b = market_fit.slate_market(s, "nfl", [G], proj, {"rec": DIST}, {"worthy": ("p1", "Worthy", "AAA", "WR")})
+    assert b["fetches"] == 2 and len(b["moves"]) == 1
+    m = b["moves"][0]
+    assert m["player_id"] == "p1" and m["open_line"] == 45.5 and m["move"] > 0.04 and m["steam"] == 1
+    assert b["movers"] == 1 and b["flat"] == 0
+    out = {o["book"]: o for o in b["outliers"]}
+    assert set(out) == {"D"} and out["D"]["side"] == "Over" and out["D"]["ev"] > 0.1   # the market says over 41.5 is cheap at -110
+    with SessionLocal() as s:   # a player the run doesn't project isn't listed
+        assert market_fit.slate_market(s, "nfl", [G], proj, {"rec": DIST}, {})["moves"] == []
