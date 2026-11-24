@@ -114,3 +114,36 @@ def recent_vs(frame: pd.DataFrame, opp: str, key: str, before_t: int, n_games: i
     games = sorted(mine.t.unique())[-n_games:]
     out = mine[mine.t.isin(games) & (mine[col] == key)]
     return out.sort_values(["t", "val"], ascending=[False, False])
+
+
+SPOT_PLAYERS = 4   # this slate's players listed under each soft spot, biggest projection first
+
+
+def soft_spots(proj: pd.DataFrame, allowed: dict = None, league_avg: dict = None) -> list:
+    """The soft-spots board: one row per (defense, depth slot or position, market) that this slate's players line up
+    against, softest grade first. proj: a run's projections with opp, kind, pos, dvp, dvp_rank, dvp_n, player_id, name,
+    team, mu, game_id and, for the NFL, dvp_slot. A WR4 (graded at his position) isn't a spot of its own. allowed /
+    league_avg (NFL): kind -> {(defense, slot): (per game, games)} and kind -> {slot: league per game}, this season."""
+    if proj.empty or "dvp_rank" not in proj:
+        return []
+    p = proj[proj.dvp_rank.notna() & proj.dvp.notna()].copy()
+    if "thin" in p:
+        p = p[~p.thin.fillna(False).astype(bool)]
+    if p.empty:
+        return []
+    slot = p.dvp_slot if "dvp_slot" in p else pd.Series(None, index=p.index, dtype=object)
+    p["key"] = slot.where(slot.notna(), p.pos)
+    p = p[~p.key.isin([g for g, d in SLOT_DEPTH.items() if d > 1])]
+    out = []
+    for (opp, key, kind), g in p.groupby(["opp", "key", "kind"], sort=False):
+        r = g.iloc[0]
+        n = int(r.dvp_n)
+        a = (allowed or {}).get(kind, {}).get((opp, key))
+        lg = (league_avg or {}).get(kind, {}).get(key)
+        top = g.sort_values("mu", ascending=False).head(SPOT_PLAYERS)
+        out.append(dict(defense=opp, key=key, kind=kind, factor=float(r.dvp), rank=int(r.dvp_rank), n=n,
+                        grade=grade(int(r.dvp_rank), n), allowed=None if a is None else float(a[0]),
+                        games=None if a is None else int(a[1]), league=None if lg is None else float(lg),
+                        players=[dict(player_id=t.player_id, name=t.name, team=t.team, pos=t.pos, mu=float(t.mu), game_id=t.game_id)
+                                 for t in top.itertuples()]))
+    return sorted(out, key=lambda s: (-s["factor"], s["defense"]))

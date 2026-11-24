@@ -15,12 +15,13 @@ from .. import books, config, market_fit, standings
 from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, current_lines, player_quotes
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
+from ..engine import dvp as dvp_mod
 from ..engine import odds
 from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, ladder_curve
 from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
-from ..schemas import (AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
+from ..schemas import (SoftSpot, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
                        LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, NbaSlate, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
 from . import espn, grading, king, lead, model
 from . import odds as nba_odds
@@ -128,6 +129,23 @@ def all_picks(db: Session, run: NbaRun, w: Optional[float], book: Optional[str] 
             picks["last5"] = []
         _pick_cache[key] = picks
     return _pick_cache[key]
+
+
+SPOT_KINDS = ("pts", "reb", "ast", "threes", "pra")   # the soft-spots board's markets
+
+
+@router.get("/soft-spots", response_model=list[SoftSpot])
+def soft_spots(db: Session = Depends(get_db)):
+    """The slate's defenses by how much they give up to guards, forwards and centers in each market against those
+    players' usual (the matchup grades), softest first, with the slate's players there. Context, not an edge."""
+    run = latest_run(db)
+    if not run:
+        return []
+    live = {g["game_id"] for g in _upcoming(run)}
+    proj = _proj_frame(db, run.id)
+    if proj.empty:
+        return []
+    return dvp_mod.soft_spots(proj[proj.game_id.isin(live) & proj.kind.isin(SPOT_KINDS)])
 
 
 @router.get("/projections", response_model=list[ProjectionOut])

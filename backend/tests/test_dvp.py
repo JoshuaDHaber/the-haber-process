@@ -97,3 +97,31 @@ def test_recent_vs_lists_the_slot_against_the_defense_newest_first_with_his_usua
     assert out.week.tolist() == [7, 5]                 # DAL's last two games before week 8, newest first; WR1s only
     assert out.usual.iloc[0] == pytest.approx(np.mean([80 + t for t in range(1, 7)]))
     assert dvp.recent_vs(pd.DataFrame(rows), "DAL", "WR", 202608, n_games=1).player_id.tolist() == ["a", "b"]
+
+
+def test_soft_spots_rank_defenses_by_slot_with_the_players_facing_them():
+    proj = pd.DataFrame([
+        dict(player_id="a", name="A", team="KC", pos="TE", opp="WAS", kind="rec", mu=60.0, dvp=1.3, dvp_rank=1, dvp_n=32, dvp_slot="TE1", game_id="g1", thin=False),
+        dict(player_id="b", name="B", team="KC", pos="WR", opp="WAS", kind="rec", mu=70.0, dvp=0.9, dvp_rank=30, dvp_n=32, dvp_slot="WR1", game_id="g1", thin=False),
+        dict(player_id="c", name="C", team="KC", pos="WR", opp="WAS", kind="rec", mu=10.0, dvp=1.0, dvp_rank=16, dvp_n=32, dvp_slot="WR", game_id="g1", thin=False),   # a WR4
+        dict(player_id="d", name="D", team="NYG", pos="TE", opp="DAL", kind="rec", mu=30.0, dvp=1.1, dvp_rank=5, dvp_n=32, dvp_slot="TE1", game_id="g2", thin=True),
+    ])
+    spots = dvp.soft_spots(proj, {"rec": {("WAS", "TE1"): (64.0, 10)}}, {"rec": {"TE1": 36.0}})
+    assert [(s["defense"], s["key"]) for s in spots] == [("WAS", "TE1"), ("WAS", "WR1")]   # no WR4 spot, thin rows left out
+    top = spots[0]
+    assert top["grade"] == "A" and top["allowed"] == 64.0 and top["games"] == 10 and top["league"] == 36.0
+    assert [p["name"] for p in top["players"]] == ["A"]
+    nba = pd.DataFrame([dict(player_id="g", name="G", team="BOS", pos="G", opp="WSH", kind="pts", mu=20.0, dvp=1.1, dvp_rank=2, dvp_n=30, game_id="x")])
+    assert dvp.soft_spots(nba)[0]["key"] == "G" and dvp.soft_spots(nba)[0]["allowed"] is None
+
+
+def test_allowed_table_sums_each_slot_per_game_this_season():
+    from app.engine import model as nfl
+    rows = []
+    for wk in (1, 2):
+        for pid, tg, yds in (("w1", 9, 90.0), ("w2", 5, 40.0)):
+            rows.append(dict(t=202600 + wk, season=2026, week=wk, player_id=pid, team="KC", position="WR", opponent_team="WAS",
+                             targets=tg, receiving_yards=yds + wk, receptions=3, carries=0, rushing_yards=0, attempts=0, passing_yards=0))
+    by, lg = nfl.allowed_table(pd.DataFrame(rows), 202603)
+    assert by["rec"][("WAS", "WR1")] == (91.5, 2) and by["rec"][("WAS", "WR2")] == (41.5, 2)
+    assert lg["rec"]["WR1"] == 91.5

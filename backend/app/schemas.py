@@ -296,6 +296,31 @@ class VsDefenseOut(BaseModel):
     rows: list[VsDefenseRow]
 
 
+class SoftSpotPlayer(BaseModel):
+    player_id: str
+    name: str
+    team: str
+    pos: str
+    mu: float
+    game_id: str
+
+
+class SoftSpot(BaseModel):
+    """One defense's grade against one depth slot (NFL) or position (NBA) in one market, with this slate's players
+    who line up there (engine/dvp.soft_spots)."""
+    defense: str
+    key: str                         # "TE1", "WR2", "QB" (NFL); "G", "F", "C" (NBA)
+    kind: str
+    factor: float                    # what the slot does against this defense vs its usual (1.31 = +31%), shrunk to par
+    rank: int                        # 1 = the softest of n
+    n: int
+    grade: str                       # A (softest fifth) to F
+    allowed: Optional[float] = None  # NFL: given up per game to the slot this season
+    games: Optional[int] = None
+    league: Optional[float] = None   # NFL: the league's average per game for the slot
+    players: list[SoftSpotPlayer]
+
+
 class GameLogEntry(BaseModel):
     label: str
     opp: str
