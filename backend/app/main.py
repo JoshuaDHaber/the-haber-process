@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import auth, bet_screens, bets, books, config, grading, slip_sync, market_fit, pipeline, scheduler, standings
 from .db import AltLine, OddsLine, PickLog, Projection, Run, SessionLocal, SyncRun, current_lines, player_quotes, proj_frame
-from .engine import data, early_win, endzone, model, odds
+from .engine import data, early_win, endzone, gamectx, model, odds
 from .engine import dvp as dvpm
 from .engine import injuries as injm
 from .engine import moneyline as mlm
@@ -35,7 +35,7 @@ from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, MarketBoard, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, MarketBoard, GameContext, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
@@ -449,6 +449,53 @@ def grades(request: Request, season: Optional[int] = None, db: Session = Depends
     if not is_admin(request):
         raise HTTPException(403, "Admin only")
     return dict(grading.report(db, season), market_fit=market_fit.summary(db, "nfl", current_lines(db).book.unique()))
+
+
+@app.get("/api/games/{game_id}/context", response_model=GameContext)
+def game_context(game_id: str, db: Session = Depends(get_db)):
+    """One game's context for its page: each team's implied points and a game-script read, each skill player's share
+    of targets and carries over the team's last 5 games against the rest of its season (with a trend), his share of
+    the team's touches inside the 20, and his chance of 2+ touchdowns. From numbers the app already has."""
+    run = latest_run(db)
+    if not run:
+        raise HTTPException(404, "No run yet")
+    key = (run.id, game_id)
+    if key not in _ctx_cache:
+        if len(_ctx_cache) > 40:
+            _ctx_cache.clear()
+        _ctx_cache[key] = build_game_context(db, run, game_id)
+    return _ctx_cache[key]
+
+
+_ctx_cache: dict = {}
+
+
+@lru_cache(maxsize=1)
+def _redzone(season: int, _hour: int) -> pd.DataFrame:
+    try:
+        return data.load_redzone([season])
+    except Exception:   # play-by-play unavailable: the shares still stand without the red-zone column
+        return pd.DataFrame(columns=data.CUT_COLUMNS["redzone"])
+
+
+def build_game_context(db: Session, run: Run, game_id: str) -> dict:
+    proj = db.scalars(select(Projection).where(Projection.run_id == run.id, Projection.game_id == game_id)).all()
+    if not proj:
+        raise HTTPException(404, "That game isn't on this week's slate")
+    pf = pd.DataFrame([dict(player_id=p.player_id, name=p.name, pos=p.pos, team=p.team, kind=p.kind, mu=p.mu) for p in proj])
+    sched = data.cached_schedule()
+    g = sched[sched.game_id == game_id] if sched is not None else pd.DataFrame()
+    _, _, away, home = game_id.split("_")
+    total = spread = None
+    if not g.empty:
+        total = None if pd.isna(g.total_line.iat[0]) else float(g.total_line.iat[0])
+        spread = None if pd.isna(g.spread_line.iat[0]) else float(g.spread_line.iat[0])
+    st = _stats(run.season)
+    if "season_type" in st:
+        st = st[st.season_type == "REG"]
+    return gamectx.game_context(pf, st, _redzone(run.season, int(time.time() // 3600)),
+                                dict(game_id=game_id, home=home, away=away, total=total, spread=spread),
+                                run.season, run.week, model.SCRIPT_RUSH, model.SCRIPT_REC)
 
 
 @app.get("/api/moneylines", response_model=list[MoneylineGame])

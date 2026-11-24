@@ -6,6 +6,7 @@ import { api, type Game, type Kind, type WeatherFit } from "../api";
 import type { DrawerPick } from "../playerHash";
 import { KIND_SHORT, MARKET_TABS, SUB_LABEL, groupOf, scrollBehavior } from "../format";
 import { PARLAY_FILTERS, useParlayBoard } from "../useParlayBoard";
+import GameContext from "./GameContext";
 import GameWeather from "./GameWeather";
 import GamePlayerSearch from "./GamePlayerSearch";
 import { GameInjuries } from "./Injuries";
@@ -30,7 +31,7 @@ interface Props {
   onSelect: (id: string, kind: Kind, pick?: DrawerPick) => void;
 }
 
-const SECTIONS: [string, string][] = [["go-props", "Best props"], ["go-parlays", "Parlays"], ["go-proj", "Projections"], ["go-inj", "Injuries"]];
+const SECTIONS: [string, string][] = [["go-ctx", "Script"], ["go-props", "Best props"], ["go-parlays", "Parlays"], ["go-proj", "Projections"], ["go-inj", "Injuries"]];
 /** Props shown before "Show all". */
 const PROPS_SHOWN = 8;
 
@@ -97,6 +98,8 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
         <GameWeather game={game} fit={fit} />
         {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? <Skeleton kind="card" label="Loading win chances…" /> : moneylines.error && !moneylines.data ? <LoadError compact what="win chances" retry={moneylines.refetch} /> : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
       </div>
+
+      <GameContext gameId={id} league="nfl" onSelect={onSelect} />
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>

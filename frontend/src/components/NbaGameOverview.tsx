@@ -6,6 +6,7 @@ import { api, type Game, type Kind, type NbaKind } from "../api";
 import type { DrawerPick } from "../playerHash";
 import { KIND_SHORT, NBA_MARKET_TABS, SUB_LABEL, groupOf, scrollBehavior } from "../format";
 import { useParlayBoard } from "../useParlayBoard";
+import GameContext from "./GameContext";
 import GamePlayerSearch from "./GamePlayerSearch";
 import { GameInjuries } from "./Injuries";
 import { BlowoutCard } from "./Blowout";
@@ -29,7 +30,7 @@ interface Props {
   onSelect: (id: string, kind: Kind, pick?: DrawerPick) => void;
 }
 
-const SECTIONS: [string, string][] = [["go-props", "Best props"], ["go-parlays", "Parlays"], ["go-proj", "Projections"], ["go-inj", "Injuries"]];
+const SECTIONS: [string, string][] = [["go-ctx", "Script"], ["go-props", "Best props"], ["go-parlays", "Parlays"], ["go-proj", "Projections"], ["go-inj", "Injuries"]];
 const PROPS_SHOWN = 8;
 
 /** Stat picker; the combo markets fold into one choice, with a pill per combo below. */
@@ -86,6 +87,8 @@ export default function NbaGameOverview({ game, books, book, onBook, marketWeigh
 
       {ml ? (ml.blowout ? <div className="go-top"><MoneylineCard g={ml} records={game.records} /><BlowoutCard g={ml} /></div> : <MoneylineCard g={ml} records={game.records} />)
         : moneylines.isLoading ? <Skeleton kind="card" label="Loading win chances…" /> : moneylines.error && !moneylines.data ? <LoadError compact what="win chances" retry={moneylines.refetch} /> : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
+
+      <GameContext gameId={id} league="nba" onSelect={onSelect} />
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>
