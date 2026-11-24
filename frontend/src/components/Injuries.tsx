@@ -107,6 +107,34 @@ export function GameInjuries({ game, report, side = "all", showReserve = false, 
   );
 }
 
+/** Game statuses that keep a player out or put him in doubt. */
+const KEY_STATUS = new Set(["Out", "Suspension", "Doubtful", "Questionable", "Day-To-Day"]);
+
+/** A game Overview's injuries: per team, the report's counts and the players with props who are out or in doubt (the ones
+ *  that move this game's lines), each opening his drawer. The full report, with practice notes and IR, is its own tab. */
+export function KeyInjuries({ game, report, onSelect }: { game: Game; report: InjuryReport; onSelect: Props["onSelect"] }) {
+  const [, , away, home] = game.game_id.split("_");
+  return (
+    <article className="card inj-card inj-key">
+      <div className="inj-teams">
+        {[away, home].map((team, i) => {
+          const players = (report.teams[team] ?? []).filter((p) => !RESERVE.has(p.status));
+          const key = players.filter((p) => p.kind && KEY_STATUS.has(p.status));
+          return (
+            <section key={team} className="inj-team">
+              <h3><b>{team}</b> <span className="mut">{i ? "home" : "away"}</span></h3>
+              <p className="mut inj-sum">{summary(players)}</p>
+              {key.length
+                ? <ul className="inj-list">{key.map((p) => <Row key={p.player_id} p={p} onSelect={onSelect} />)}</ul>
+                : <p className="mut inj-none">No players with props out or in doubt.</p>}
+            </section>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 /** Players listed Out, Doubtful or Questionable (the reserve lists left out). */
 export const gameStatusCounts = (players: InjuredPlayer[]) => ({
   out: players.filter((p) => p.status === "Out" || p.status === "Suspension").length,

@@ -1,4 +1,5 @@
 import { IconFilterOff } from "@tabler/icons-react";
+import { useState } from "react";
 import type { Filters, GameWeather, Projection } from "../api";
 import { isYesNo, KIND_LABEL, effText, fmtProj, fmtSd, matchup, signed } from "../format";
 import { useIncremental } from "../useIncremental";
@@ -13,11 +14,16 @@ import MatchupGrade from "./MatchupGrade";
 
 export const THIN_TITLE = "Only a game or two of history (a rookie, or back from IR): a rough guess, shown for reference and never priced";
 
-/** filters: the board's, so an empty board can point at the ones hiding rows (a game page has none). */
-export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false, filters, busy = false }: { rows: Projection[]; onSelect: (p: Projection) => void; busy?: boolean;
-  weather?: Record<string, GameWeather | null | undefined>; nba?: boolean; filters?: Filters }) {
+/** filters: the board's, so an empty board can point at the ones hiding rows (a game page has none).
+ *  limit: show only the top rows in the current sort, with a "Show all" button (a game page; the boards scroll on instead). */
+export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = false, filters, busy = false, limit }: { rows: Projection[]; onSelect: (p: Projection) => void; busy?: boolean;
+  weather?: Record<string, GameWeather | null | undefined>; nba?: boolean; filters?: Filters; limit?: number }) {
   const { sorted, toggle, arrow, sortOf } = useSort(rows, "mu");
-  const { visible, more, showMore, sentinel } = useIncremental(sorted);
+  const [showAll, setShowAll] = useState(false);
+  const capped = limit !== undefined && !showAll && sorted.length > limit;
+  const { visible: incremental, more: moreRows, showMore, sentinel } = useIncremental(sorted);
+  const visible = capped ? sorted.slice(0, limit) : incremental;
+  const more = !capped && moreRows;
   const th = (key: string, label: string, title?: string) => (
     <SortTh k={key} label={label} title={title} toggle={toggle} arrow={arrow} sortOf={sortOf} />
   );
@@ -63,6 +69,9 @@ export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = f
         </tbody>
       </table>
     </div>
+    {limit !== undefined && sorted.length > limit && (
+      <button className="link go-more" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${sorted.length} projections`}</button>
+    )}
     {more && (
       <div ref={sentinel} className="more-rows">
         <button className="primary outline" onClick={showMore}>Show more ({visible.length.toLocaleString()} of {sorted.length.toLocaleString()})</button>
