@@ -1189,3 +1189,16 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .vs-card td:first-child { white-space: normal; }
 .vs-card td small { font-size: 11px; }
 .vs-meta { display: block; font-weight: 400; }
+
+/* Soft spots (SoftSpots.tsx): defenses by how much they give up to a depth slot or position */
+.spots-controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 6px; }
+.spots-controls .chips { margin-top: 0; } .spots-controls .chip-btn { min-height: 32px; padding: 0 12px; }
+.spots-controls .seg { max-width: 100%; overflow-x: auto; }
+.spots-note { margin-bottom: 10px; }
+.spots-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.spot { padding: 12px 14px; border-radius: 16px; display: flex; flex-direction: column; gap: 4px; }
+.spot-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .spot-h .mgrade { margin-left: auto; }
+.spot p { margin: 0; font-size: 13px; line-height: 1.4; } .spot-usual { font-size: 12px !important; }
+.spot-players { list-style: none; margin: 4px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.spot-link { text-align: left; font-size: 13px; padding: 4px 0; min-height: 32px; }
+.spots-more { margin: 12px 0 0; text-align: center; }

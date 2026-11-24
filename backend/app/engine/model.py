@@ -257,6 +257,28 @@ def dvp_table(df, upto_t):
     return dvp.ranks({k: {**by_grp.get(k, {}), **by_slot.get(k, {})} for k in kinds})
 
 
+def allowed_table(df, upto_t):
+    """What each defense gave up per game to each depth slot this season, before upto_t, for the soft-spots board:
+    (kind -> {(defense, slot): (per game, games)}, kind -> {slot: league average per game}). A game where the slot had
+    no role in the market (no carries, say) doesn't count toward it."""
+    season = upto_t // 100
+    d = df[(df.t < upto_t) & (df.t >= season * 100)]
+    if d.empty:
+        return {}, {}
+    slot = depth_slots(df[df.t < upto_t]).reindex(d.index)
+    by, lg = {}, {}
+    for kind in DVP_KINDS:
+        val = dvp_values(d, kind)
+        if val is None:
+            continue
+        f = pd.DataFrame({"opp": d.opponent_team, "t": d.t, "slot": slot, "val": val}).dropna(subset=["slot", "val"])
+        per_game = f.groupby(["opp", "slot", "t"]).val.sum()
+        agg = per_game.groupby(["opp", "slot"]).agg(["mean", "count"])
+        by[kind] = {k: (float(r["mean"]), int(r["count"])) for k, r in agg.iterrows()}
+        lg[kind] = per_game.groupby("slot").mean().to_dict()
+    return by, lg
+
+
 def dvp_fields(table, kind, opp, pos, slot=None) -> dict:
     """The matchup-grade columns for one projection row (None where the market has no grade): the depth slot's grade
     where he has one, else his position's. dvp_slot names which ("WR2", or "WR" for a WR4)."""

@@ -160,6 +160,10 @@ export interface Ladder { kind: Kind; mu: number; sd: number; game_id: string; a
 export interface VsDefenseRow { player_id: string; name: string; team: string; season: number; week: number; actual: number; usual: number | null;
   line: number | null; result: "over" | "under" | "push" | null }
 export interface VsDefense { kind: Kind; opp: string; slot: string; games: number; rows: VsDefenseRow[] }
+/** One defense's grade against a depth slot (NFL) or position (NBA) in one market (backend engine/dvp.soft_spots). */
+export interface SoftSpotPlayer { player_id: string; name: string; team: string; pos: string; mu: number; game_id: string }
+export interface SoftSpot { defense: string; key: string; kind: Kind; factor: number; rank: number; n: number; grade: string;
+  allowed: number | null; games: number | null; league: number | null; players: SoftSpotPlayer[] }
 export interface HistoryPoint { at: string; line: number; books: number; p_over: number | null; p_now_line: number | null; best_over: number | null; best_under: number | null }
 /** One team's side of a game: win chance from the team model, the market (no-vig) and the blend, and the best moneyline. */
 export interface MoneylineSide {
@@ -327,6 +331,8 @@ export const api = {
   /** How a player's market moved through the week (one point per odds fetch). */
   /** NFL only: same-slot players' recent games against this player's opponent. */
   vsDefense: (id: string, kind: Kind) => get<VsDefense>(`players/${id}/vs-defense`, { kind }),
+  /** The league on screen's defenses by how soft they are for each slot and market, softest first. */
+  softSpots: () => get<SoftSpot[]>(lg("soft-spots")),
   history: (id: string, kind: Kind) => get<HistoryPoint[]>(`${NBA_KIND_SET.has(kind) ? "nba/" : ""}players/${id}/history`, { kind }),
   injuries: () => get<InjuryReport>(lg("injuries")),
   grades: () => get<GradeReport>("grades"),

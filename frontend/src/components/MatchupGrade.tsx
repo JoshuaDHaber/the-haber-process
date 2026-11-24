@@ -7,7 +7,7 @@ const GROUP: Record<string, string> = { G: "guards", F: "forwards", C: "centers"
 /** A for the softest fifth of the league's defenses against this position (as engine/dvp.py grades it), F for the toughest. */
 export const matchupGrade = (rank: number, n: number) => GRADES[Math.min(Math.floor(((rank - 1) * GRADES.length) / Math.max(n, 1)), GRADES.length - 1)];
 
-const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 
 /** Who a grade is about: a depth slot ("WR2s") where the NFL graded one, else the position group. */
 export const slotGroup = (pos: string, slot?: string | null) => (slot && /\d$/.test(slot) ? `${slot}s` : GROUP[pos] ?? "his position");

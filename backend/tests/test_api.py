@@ -599,3 +599,9 @@ def test_vs_defense_lists_the_slot_against_his_opponent_with_logged_lines(client
     assert [(r["player_id"], r["week"]) for r in d["rows"]] == [("c1", 3), ("c1", 1)]
     assert d["rows"][0]["line"] == 65.5 and d["rows"][0]["result"] == "over" and d["rows"][1]["line"] is None
     assert d["rows"][0]["usual"] == pytest.approx(71.5)   # his weeks 1 and 2 (71, 72)
+
+
+def test_soft_spots_answer_with_or_without_grades(client):
+    r = client.get("/api/soft-spots")
+    assert r.status_code == 200 and isinstance(r.json(), list)
+    assert client.get("/api/nba/soft-spots").status_code == 200

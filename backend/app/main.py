@@ -35,7 +35,7 @@ from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
@@ -677,6 +677,28 @@ def build_vs_defense(db: Session, run: Run, p: Projection) -> VsDefenseOut:
         out.append(VsDefenseRow(player_id=r.player_id, name=str(r.name), team=r.team, season=int(r.season), week=int(r.week),
                                 actual=float(r.val), usual=None if pd.isna(r.usual) else float(r.usual), line=ln, result=res))
     return VsDefenseOut(kind=p.kind, opp=p.opp, slot=key, rows=out, games=int(rows.t.nunique()))
+
+
+@app.get("/api/soft-spots", response_model=list[SoftSpot])
+def soft_spots(db: Session = Depends(get_db)):
+    """This week's defenses by how much they give up to each depth slot in each market against what those players
+    usually do (the matchup grades), softest first, with the slate's players who line up there. Context, not an edge."""
+    run = latest_run(db)
+    return build_soft_spots(db, run) if run else []
+
+
+_spots_cache: dict = {}
+
+
+def build_soft_spots(db: Session, run: Run) -> list[dict]:
+    if run.id not in _spots_cache:
+        _spots_cache.clear()
+        try:
+            allowed, league = model.allowed_table(_stats(run.season), run.season * 100 + run.week)
+        except Exception:   # the game logs couldn't load: the grades still stand without the per-game numbers
+            allowed, league = {}, {}
+        _spots_cache[run.id] = dvpm.soft_spots(proj_frame(db, run.id), allowed, league)
+    return _spots_cache[run.id]
 
 
 @app.get("/api/players/{player_id}/history", response_model=list[HistoryPoint])
