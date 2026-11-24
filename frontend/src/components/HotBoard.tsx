@@ -161,7 +161,7 @@ export default function HotBoard({ board, onSelect, weather = {} }: { board: Ret
                         {r.flagged && <span className="flag" title={`${flagChip(r).title}, so Best props hides this price`}>{flagChip(r).label}</span>}
                         <br /><span className="mut">{matchup(r.opp, r.home)} · {kickoff(r.gameday, r.gametime)}</span>
                         {!isYesNo(r.kind) && <WeatherChip weather={weather[r.game_id]} wx={r.wx} />}
-                        <MatchupGrade kind={r.kind} pos={r.pos} opp={r.opp} rank={r.dvp_rank} n={r.dvp_n} side={r.side} quiet />
+                        <MatchupGrade kind={r.kind} pos={r.pos} opp={r.opp} rank={r.dvp_rank} n={r.dvp_n} slot={r.dvp_slot} side={r.side} quiet />
                       </div>
                     </div>
                   </td>

@@ -60,6 +60,7 @@ class Projection(Base):
     dvp: Mapped[float] = mapped_column(Float, nullable=True)        # matchup grade (engine/dvp.py): the defense's factor vs his position
     dvp_rank: Mapped[int] = mapped_column(Integer, nullable=True)   # 1 = the softest defense for his position and this market
     dvp_n: Mapped[int] = mapped_column(Integer, nullable=True)      # teams ranked
+    dvp_slot: Mapped[str] = mapped_column(String(4), nullable=True)  # what was graded: his depth slot ("WR2") or position ("WR")
     run: Mapped[Run] = relationship(back_populates="projections")
 
     __table_args__ = (Index("ix_proj_run_kind", "run_id", "kind"),)
@@ -542,6 +543,7 @@ def ensure_columns(eng) -> bool:
     for table, col, sql_type in (("runs", "weather", "JSON"), ("runs", "teams", "JSON"), ("projections", "wx", "FLOAT"),
                                  ("projections", "teammate_out", "VARCHAR(160)"), ("projections", "thin", "BOOLEAN"),
                                  ("projections", "qb_adj", "FLOAT"), ("projections", "qb_name", "VARCHAR(80)"),
+                                 ("projections", "dvp_slot", "VARCHAR(4)"),
                                  ("nba_projections", "parts", "JSON"), ("users", "favorites", "JSON"),
                                  # bets.tags: a database whose bets table predates tags (an early local one)
                                  ("bets", "tags", "JSON"), ("bets", "description", "VARCHAR(200)"),

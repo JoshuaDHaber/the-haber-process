@@ -51,7 +51,7 @@ export default function ProjectionsTable({ rows, onSelect, weather = {}, nba = f
               </td>
               <td>{KIND_LABEL[p.kind]}</td>
               <td>{matchup(p.opp, p.home)}{!isYesNo(p.kind) && <WeatherChip weather={weather[p.game_id]} wx={p.wx} />}
-                <MatchupGrade kind={p.kind} pos={p.pos} opp={p.opp} rank={p.dvp_rank} n={p.dvp_n} factor={p.dvp} /></td>
+                <MatchupGrade kind={p.kind} pos={p.pos} opp={p.opp} rank={p.dvp_rank} n={p.dvp_n} factor={p.dvp} slot={p.dvp_slot} /></td>
               <td data-label="Proj"><b>{fmtProj(p.kind, p.mu)}</b></td>
               <td data-label="SD">{isYesNo(p.kind) ? "–" : fmtSd(p.kind, p.sd)}</td>
               <td data-label={nba ? "Minutes" : "Volume"}>{p.vol.toFixed(1)}</td>

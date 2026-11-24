@@ -96,7 +96,7 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
                       : `${p.teammate_out} out (first game): the model doesn't hand his targets to teammates. In past games like this, receivers averaged a few more yards than projected, from occasional big games, but beat their projection no more often than usual.`}>teammate out</span>}
                     <br /><span className="mut">{matchup(p.opp, p.home)} · {kickoff(p.gameday, p.gametime)}</span>
                     {!isYesNo(p.kind) && <WeatherChip weather={weather[p.game_id]} wx={p.wx} />}
-                    <MatchupGrade kind={p.kind} pos={p.pos} opp={p.opp} rank={p.dvp_rank} n={p.dvp_n} side={p.side} quiet />
+                    <MatchupGrade kind={p.kind} pos={p.pos} opp={p.opp} rank={p.dvp_rank} n={p.dvp_n} slot={p.dvp_slot} side={p.side} quiet />
                   </div>
                 </div>
               </td>

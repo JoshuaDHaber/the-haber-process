@@ -139,6 +139,7 @@ class ProjectionOut(BaseModel):
     dvp: Optional[float] = None       # matchup grade (engine/dvp.py): the defense's factor against his position
     dvp_rank: Optional[int] = None    # 1 = the softest matchup of dvp_n
     dvp_n: Optional[int] = None
+    dvp_slot: Optional[str] = None    # NFL: what was graded, his depth slot ("WR2") or, past the depth tracked, his position
 
 
 class PickOut(BaseModel):
@@ -179,6 +180,7 @@ class PickOut(BaseModel):
     steam: int = 0                     # +1 books moved together toward this side between the last two fetches, -1 against
     dvp_rank: Optional[int] = None     # matchup grade: 1 = the softest defense for his position and this market, of dvp_n
     dvp_n: Optional[int] = None
+    dvp_slot: Optional[str] = None     # NFL: the depth slot ("WR2") or position the grade is for
 
 
 class HotOut(PickOut):
@@ -271,6 +273,27 @@ class GradeReport(BaseModel):
     clv: list[ClvLine] = []
     clv_by_market: list[ClvLine] = []
     market_fit: Optional[MarketFit] = None
+
+
+class VsDefenseRow(BaseModel):
+    player_id: str
+    name: str
+    team: str
+    season: int
+    week: int
+    actual: float                   # what he did against this defense
+    usual: Optional[float] = None   # his average over his previous games going in (engine/dvp.USUAL_GAMES)
+    line: Optional[float] = None    # the line the board logged for him that week (pick_log), if any
+    result: Optional[Literal["over", "under", "push"]] = None   # against that line
+
+
+class VsDefenseOut(BaseModel):
+    """Players in one depth slot who faced a defense lately (engine/dvp.recent_vs), newest first."""
+    kind: str
+    opp: str
+    slot: str           # the slot ("WR2") or position ("WR") compared
+    games: int = 0      # the defense's games looked at
+    rows: list[VsDefenseRow]
 
 
 class GameLogEntry(BaseModel):

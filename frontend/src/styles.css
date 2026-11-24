@@ -1180,3 +1180,12 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .board-note { margin: 8px 2px 0; }
 .empty-state.error .es-icon { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 .empty-state:focus { outline: none; } .empty-state:focus-visible { outline: 2px solid var(--acc2); outline-offset: 2px; }
+
+/* The drawer's "recent games vs this defense" (VsDefense.tsx) */
+.vs-def { margin-top: 14px; }
+.vs-card { padding: 0; overflow-x: auto; border-radius: 16px; }
+.vs-card table { font-size: 13px; }
+.vs-card th, .vs-card td { padding: 7px 10px; position: static; }
+.vs-card td:first-child { white-space: normal; }
+.vs-card td small { font-size: 11px; }
+.vs-meta { display: block; font-weight: 400; }

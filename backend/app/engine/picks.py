@@ -16,7 +16,7 @@ HOLD = {"td": TD_ASSUMED_HOLD, "ftd": FTD_ASSUMED_HOLD, "dd": DD_ASSUMED_HOLD, "
 PICK_COLUMNS = [
     "player_id", "name", "pos", "team", "opp", "home", "kind", "mu", "sd", "status", "game_id", "gameday", "gametime",
     "side", "line", "odds", "book", "p_model", "p_mkt", "prob", "ev", "kelly", "books", "edge_yds", "flagged", "wx",
-    "flag", "teammate_out", "hours", "w", "median", "dvp_rank", "dvp_n", "p_raw",
+    "flag", "teammate_out", "hours", "w", "median", "dvp_rank", "dvp_n", "dvp_slot", "p_raw",
 ]
 # a quote this far from the consensus line (or 30% of it) is an alternate or stale line; receptions are counted in catches,
 # passing TDs in touchdowns (lines step 0.5 / 1.5 / 2.5, so a whole TD off the consensus is another line)
@@ -46,7 +46,9 @@ def _dvp(p) -> dict:
     """A projection's matchup rank, for its picks (None where the projection has none)."""
     rank, n = getattr(p, "dvp_rank", None), getattr(p, "dvp_n", None)
     ok = rank is not None and pd.notna(rank)
-    return dict(dvp_rank=int(rank) if ok else None, dvp_n=int(n) if ok else None)
+    slot = getattr(p, "dvp_slot", None)
+    return dict(dvp_rank=int(rank) if ok else None, dvp_n=int(n) if ok else None,
+                dvp_slot=slot if ok and isinstance(slot, str) else None)
 
 
 def book_set(only_book: str = None):

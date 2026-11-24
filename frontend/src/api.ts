@@ -106,6 +106,8 @@ export interface Projection {
   parts?: { min: number; tm_min: number; rate?: number; opp?: number; tm?: number; out: { name: string; missed: number }[] } | null;
   /** Matchup grade (backend engine/dvp.py): the defense's factor against his position, its rank (1 = softest) of dvp_n. */
   dvp?: number | null; dvp_rank?: number | null; dvp_n?: number | null;
+  /** NFL: what the grade is for, his depth slot ("WR2", "RB1") or, past the depth tracked, his position ("WR"). */
+  dvp_slot?: string | null;
 }
 export interface Pick {
   player_id: string; name: string; pos: string; team: string; opp: string; home: boolean; kind: Kind;
@@ -132,7 +134,7 @@ export interface Pick {
   /** The outcome he beats half the time: below mu where a few long plays pull the average up (longest rush). Null for yes/no markets. */
   median?: number | null;
   /** Matchup grade: the defense's rank against his position for this market (1 = softest) of dvp_n. */
-  dvp_rank?: number | null; dvp_n?: number | null;
+  dvp_rank?: number | null; dvp_n?: number | null; dvp_slot?: string | null;
 }
 /** A player search hit: an active player; projected is false for players on bye, off the NBA slate, or without a projection. */
 export interface PlayerHit { player_id: string; name: string; pos: string; team: string; headshot?: string | null; projected: boolean }
@@ -154,6 +156,10 @@ export interface Ladder { kind: Kind; mu: number; sd: number; game_id: string; a
   /** The market's distribution read off the ladder (location m, spread s, its median) and the weight it gets in each rung's chance. */
   curve?: { m: number; s: number; median: number; n_lines: number } | null; w?: number | null }
 /** One odds fetch of a player's market: the consensus line, its fair over chance, and the over's fair chance at the current line. */
+/** Players in one depth slot who faced a defense lately (backend engine/dvp.recent_vs), newest first. */
+export interface VsDefenseRow { player_id: string; name: string; team: string; season: number; week: number; actual: number; usual: number | null;
+  line: number | null; result: "over" | "under" | "push" | null }
+export interface VsDefense { kind: Kind; opp: string; slot: string; games: number; rows: VsDefenseRow[] }
 export interface HistoryPoint { at: string; line: number; books: number; p_over: number | null; p_now_line: number | null; best_over: number | null; best_under: number | null }
 /** One team's side of a game: win chance from the team model, the market (no-vig) and the blend, and the best moneyline. */
 export interface MoneylineSide {
@@ -319,6 +325,8 @@ export const api = {
   /** Teams on a winning streak of the league on screen, with their moneyline at `book` (best price anywhere for "all"). */
   hotTeams: (f: Filters, window: number) => get<HotTeam[]>(lg("hot-teams"), { book: bookParam(f.book), game_id: f.game, gameday: f.date, window }),
   /** How a player's market moved through the week (one point per odds fetch). */
+  /** NFL only: same-slot players' recent games against this player's opponent. */
+  vsDefense: (id: string, kind: Kind) => get<VsDefense>(`players/${id}/vs-defense`, { kind }),
   history: (id: string, kind: Kind) => get<HistoryPoint[]>(`${NBA_KIND_SET.has(kind) ? "nba/" : ""}players/${id}/history`, { kind }),
   injuries: () => get<InjuryReport>(lg("injuries")),
   grades: () => get<GradeReport>("grades"),

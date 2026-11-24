@@ -196,30 +196,74 @@ def dvp_group(pos: str) -> str:
     return "RB" if pos == "FB" else pos
 
 
+def dvp_values(d, kind):
+    """A grade market's stat per row, NaN where the player had no role in it (no carries for rushing; rush + receiving
+    counts either role), or None where the columns are missing."""
+    parts = [CFG[k] for k in (("rush", "rec") if kind == "rr" else (kind,))]
+    if any(c["yds"] not in d or c["vol"] not in d for c in parts):
+        return None
+    role = sum(d[c["vol"]].fillna(0) for c in parts).to_numpy() > 0
+    return (d[parts[0]["yds"]] if len(parts) == 1 else sum(d[c["yds"]].fillna(0) for c in parts)).where(role)
+
+
+def role_vol(d) -> np.ndarray:
+    """Each row's role for the depth slots (engine/dvp.py): targets, plus carries for backs; pass attempts for QBs."""
+    tg = d.targets.fillna(0).to_numpy() if "targets" in d else np.zeros(len(d))
+    ca = d.carries.fillna(0).to_numpy() if "carries" in d else np.zeros(len(d))
+    att = d.attempts.fillna(0).to_numpy() if "attempts" in d else np.zeros(len(d))
+    grp = d.position.map(dvp_group).to_numpy()
+    return np.where(grp == "RB", tg + ca, np.where(grp == "QB", att, tg))
+
+
+def depth_slots(df) -> pd.Series:
+    """Every player-game's depth slot ("WR2", "RB1", "QB"; None past the depth tracked), indexed like df."""
+    from . import dvp
+    if df.empty or "team" not in df:
+        return pd.Series([None] * len(df), index=df.index, dtype=object)
+    return dvp.slots(pd.DataFrame({"player_id": df.player_id.to_numpy(), "team": df.team.to_numpy(), "t": df.t.to_numpy(),
+                                   "grp": df.position.map(dvp_group).to_numpy(), "vol": role_vol(df)}, index=df.index))
+
+
+def current_slots(members, absent=()) -> dict:
+    """player -> depth slot for one team this week: its healthy members ranked by their average role over their last
+    dvp.SLOT_GAMES games. members: dicts with pid, pos and hist (as in upcoming_projections)."""
+    from . import dvp
+    role = {c["pid"]: (dvp_group(c["pos"]), float(role_vol(c["hist"].tail(dvp.SLOT_GAMES)).mean()) if len(c["hist"]) else 0.0)
+            for c in members if c["pid"] not in absent}
+    return dvp.rank_slots(role)
+
+
 def dvp_table(df, upto_t):
-    """kind -> {(defense, position): (factor, rank, teams)} for the matchup grades, from the season before upto_t
-    (earlier weeks at half weight): what each defense allowed each position against those players' usual game."""
+    """kind -> {(defense, position or slot): (factor, rank, teams)} for the matchup grades, from the season before
+    upto_t (earlier weeks at half weight): what each defense allowed each position, and each depth slot (WR1, RB2...),
+    against those players' usual game."""
     from . import dvp
     d = df[(df.t < upto_t) & (df.t >= upto_t - 100)]
     if d.empty:
         return {}
+    slot = depth_slots(df[df.t < upto_t]).reindex(d.index)
     frame = pd.DataFrame({"opp": d.opponent_team.to_numpy(), "grp": d.position.map(dvp_group).to_numpy(),
-                          "w": np.where(d.season.to_numpy() < upto_t // 100, 0.5, 1.0)})
+                          "slot": slot.to_numpy(), "w": np.where(d.season.to_numpy() < upto_t // 100, 0.5, 1.0)})
     for kind in DVP_KINDS:
-        parts = [CFG[k] for k in (("rush", "rec") if kind == "rr" else (kind,))]   # rush + rec: both yardages, either role
-        if any(c["yds"] not in d or c["vol"] not in d for c in parts):
+        yds = dvp_values(d, kind)
+        if yds is None:
             continue
-        role = sum(d[c["vol"]].fillna(0) for c in parts).to_numpy() > 0
-        yds = (d[parts[0]["yds"]] if len(parts) == 1 else sum(d[c["yds"]].fillna(0) for c in parts)).where(role)
         frame[f"act_{kind}"] = yds.to_numpy()
-        frame[f"exp_{kind}"] = d.player_id.map(yds.groupby(d.player_id).mean()).where(role).to_numpy()
-    return dvp.ranks(dvp.factors(frame, [k for k in DVP_KINDS if f"act_{k}" in frame], DVP_K_ROWS))
+        frame[f"exp_{kind}"] = d.player_id.map(yds.groupby(d.player_id).mean()).where(yds.notna()).to_numpy()
+    kinds = [k for k in DVP_KINDS if f"act_{k}" in frame]
+    by_grp = dvp.factors(frame, kinds, DVP_K_ROWS)
+    sl = frame[frame.slot.notna() & (frame.slot != frame.grp)].assign(grp=lambda f: f.slot)
+    by_slot = dvp.factors(sl, kinds, DVP_K_ROWS) if not sl.empty else {}
+    return dvp.ranks({k: {**by_grp.get(k, {}), **by_slot.get(k, {})} for k in kinds})
 
 
-def dvp_fields(table, kind, opp, pos) -> dict:
-    """The matchup-grade columns for one projection row (None where the market has no grade)."""
-    f = table.get(kind, {}).get((opp, dvp_group(pos)))
-    return dict(dvp=f[0], dvp_rank=f[1], dvp_n=f[2]) if f else dict(dvp=None, dvp_rank=None, dvp_n=None)
+def dvp_fields(table, kind, opp, pos, slot=None) -> dict:
+    """The matchup-grade columns for one projection row (None where the market has no grade): the depth slot's grade
+    where he has one, else his position's. dvp_slot names which ("WR2", or "WR" for a WR4)."""
+    by = table.get(kind, {})
+    key = slot if slot and (opp, slot) in by else dvp_group(pos)
+    f = by.get((opp, key))
+    return dict(dvp=f[0], dvp_rank=f[1], dvp_n=f[2], dvp_slot=key) if f else dict(dvp=None, dvp_rank=None, dvp_n=None, dvp_slot=None)
 
 
 def project_player(hist, kind, prior_eff, opp_dev=0.0, spread=0.0):
@@ -722,6 +766,7 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
             # a one-game QB is projected only as the starter (Joe Fagnano, BAL 2026 week 9, with Jackson and Huntley out)
             members = [c for c in members if c["pos"] != "QB" or len(c["hist"]) >= 2 or c["pid"] == starter]
             thin_qbs = {c["pid"] for c in members if c["pos"] == "QB" and len(c["hist"]) < THIN_GAMES}
+            slot_of = current_slots(members, absent_ids)
             qb_f = 1.0
             if starter is not None and QB_REC_K:
                 before = starts[(starts.team == team) & (starts.t < week_t)].sort_values("t").player_id.tolist()
@@ -751,7 +796,7 @@ def upcoming_projections(df, sched, priors, var_params, week_t, roster, td_prior
                                      gameday=gm.gameday, gametime=gm.gametime, game_id=gm.game_id,
                                      last5=actual_hist(hist, kind).tail(5).tolist(), wx=wx_ratio(kind, comp, wx),
                                      teammate_out=out_here if kind in rd.TAG_KINDS else "", thin=pid in thin_qbs,
-                                     **qb_fields(kind, p.position, comp, qb_f, qb_name), **dvp_fields(dv, kind, other, p.position)))
+                                     **qb_fields(kind, p.position, comp, qb_f, qb_name), **dvp_fields(dv, kind, other, p.position, slot_of.get(pid))))
             # thin-history players: the markets the volume minimum dropped, projected as-is and flagged (not in redistribution)
             have = {(r["player_id"], r["kind"]) for r in rows}
             for pid, p, hist in thin:

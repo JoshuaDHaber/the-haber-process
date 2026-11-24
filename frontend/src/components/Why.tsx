@@ -47,7 +47,7 @@ export function WhyPanel({ kind, proj, play, curveWeight, nba }: { kind: Kind; p
   if (!steps.length && !q) return null;
   const w = curveWeight ?? null;
   const grade = !yesNo && proj.dvp_rank != null && proj.dvp_n != null
-    ? { letter: matchupGrade(proj.dvp_rank, proj.dvp_n), text: matchupText(kind, proj.pos, proj.opp, proj.dvp_rank, proj.dvp_n, proj.dvp) } : null;
+    ? { letter: matchupGrade(proj.dvp_rank, proj.dvp_n), text: matchupText(kind, proj.pos, proj.opp, proj.dvp_rank, proj.dvp_n, proj.dvp, proj.dvp_slot) } : null;
   return (
     <section className="why" aria-label="Why this number">
       <h3>Why {yesNo ? "this chance" : `${fmtProj(kind, proj.mu)} ${unit(kind)}`}</h3>
@@ -72,7 +72,7 @@ export function WhyPanel({ kind, proj, play, curveWeight, nba }: { kind: Kind; p
           </ol>
         )}
         {grade && (
-          <p className="why-ctx"><MatchupGrade kind={kind} pos={proj.pos} opp={proj.opp} rank={proj.dvp_rank} n={proj.dvp_n} factor={proj.dvp} side={play?.side} />
+          <p className="why-ctx"><MatchupGrade kind={kind} pos={proj.pos} opp={proj.opp} rank={proj.dvp_rank} n={proj.dvp_n} factor={proj.dvp} slot={proj.dvp_slot} side={play?.side} />
             <span>{grade.text}</span><Info term="matchup" /></p>
         )}
       </div>

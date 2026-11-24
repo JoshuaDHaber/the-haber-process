@@ -570,3 +570,32 @@ def test_warming_the_caches_builds_the_boards_and_never_raises(client, monkeypat
     assert any(k[3] is None for k in main._pick_cache) and any(k[3] == "X" for k in main._pick_cache)   # every book, and each one
     monkeypatch.setattr(main, "build_meta", lambda db: 1 / 0)
     main.warm_caches()   # logged, not raised: a request builds it instead
+
+
+def test_vs_defense_lists_the_slot_against_his_opponent_with_logged_lines(client, monkeypatch):
+    from app.db import PickLog
+    rows = []
+    for wk in (1, 2, 3):   # BBB faces CCC's backs in weeks 1 and 3: RB1 "c1", RB2 "c2"
+        opp = "BBB" if wk != 2 else "DDD"
+        for pid, car, yds in (("c1", 18, 70.0 + wk), ("c2", 6, 20.0)):
+            rows.append(dict(player_id=pid, player_display_name=pid.upper(), season=2026, week=wk, t=202600 + wk, position="RB",
+                             team="CCC", opponent_team=opp, carries=car, rushing_yards=yds, targets=2, receiving_yards=10.0,
+                             receptions=1, attempts=0, passing_yards=0.0))
+    st = pd.DataFrame(rows)
+    monkeypatch.setattr(main, "_stats", lambda season: st)
+    main._slots.cache_clear()
+    with SessionLocal() as s:
+        p = s.query(Projection).filter_by(player_id="p0").one()
+        p.dvp_slot = "RB1"
+        s.add(PickLog(season=2026, week=3, game_id="g", gameday="2026-09-21", gametime="13:00", player_id="c1", name="C1",
+                      pos="RB", team="CCC", kind="rush", side="Over", line=65.5, odds=-110, book="X", mu=70, prob=.5,
+                      p_model=.5, p_mkt=.5, ev=0, run_id=p.run_id))
+        s.commit()
+    try:
+        d = client.get("/api/players/p0/vs-defense", params={"kind": "rush"}).json()
+    finally:
+        main._slots.cache_clear()
+    assert d["slot"] == "RB1" and d["opp"] == "BBB" and d["games"] == 2
+    assert [(r["player_id"], r["week"]) for r in d["rows"]] == [("c1", 3), ("c1", 1)]
+    assert d["rows"][0]["line"] == 65.5 and d["rows"][0]["result"] == "over" and d["rows"][1]["line"] is None
+    assert d["rows"][0]["usual"] == pytest.approx(71.5)   # his weeks 1 and 2 (71, 72)
