@@ -35,7 +35,7 @@ from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, MarketBoard, GameContext, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, MarketBoard, GameContext, BaseRates, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
@@ -496,6 +496,13 @@ def build_game_context(db: Session, run: Run, game_id: str) -> dict:
     return gamectx.game_context(pf, st, _redzone(run.season, int(time.time() // 3600)),
                                 dict(game_id=game_id, home=home, away=away, total=total, spread=spread),
                                 run.season, run.week, model.SCRIPT_RUSH, model.SCRIPT_REC)
+
+
+@app.get("/api/base-rates", response_model=BaseRates)
+def base_rates(db: Session = Depends(get_db)):
+    """How often this season's posted lines went over, per market and position, and the average result against them:
+    the base rate behind any one line. From the graded board (pick_log), the lines Model check grades."""
+    return grading.base_rates(db)
 
 
 @app.get("/api/moneylines", response_model=list[MoneylineGame])

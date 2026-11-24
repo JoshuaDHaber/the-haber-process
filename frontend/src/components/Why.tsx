@@ -1,5 +1,5 @@
-import type { GameLogEntry, Kind, Projection } from "../api";
-import { americanOdds, effText, fmtProj, isDouble, isYesNo, pct, playLabel, signedPct, unit, volLabel } from "../format";
+import type { BaseRate, BaseRates, GameLogEntry, Kind, Projection } from "../api";
+import { KIND_LABEL, americanOdds, effText, fmtProj, isDouble, isYesNo, pct, playLabel, signedPct, unit, volLabel } from "../format";
 import { hitSplits } from "../gameLog";
 import type { Cell } from "./LineLadder";
 import Info from "./Info";
@@ -85,13 +85,31 @@ export function WhyPanel({ kind, proj, play, curveWeight, nba, form }: { kind: K
   );
 }
 
-/** Hit rates over slices of his games at the play's line, beside the model's chance: context, since raw rates know
- *  nothing about minutes, matchups or who's out. */
-export function HitSplits({ kind, logs, side, line, opp, home, modelChance }: {
+/** The base rate for a posted line in this market: his position's, once it has min_n graded lines, else every position's. */
+export function baseRateFor(data: BaseRates | undefined, kind: Kind, pos: string): BaseRate | null {
+  const rows = data?.rates.filter((r) => r.kind === kind) ?? [];
+  const own = rows.find((r) => r.pos === pos && r.n >= data!.min_n);
+  const all = rows.find((r) => r.pos === "all" && r.n >= data!.min_n);
+  return own ?? all ?? null;
+}
+
+/** In words: "Receiving yds lines for WRs this season: overs hit 48%, the average result +4.9 against the line (292 graded)." */
+export function baseRateText(r: BaseRate, side: "Over" | "Under", posLabel?: string) {
+  const who = r.pos === "all" ? "" : ` for ${posLabel ?? ({ G: "guards", F: "forwards", C: "centers" }[r.pos] ?? `${r.pos}s`)}`;
+  const avg = `${r.avg >= 0 ? "+" : "−"}${Math.abs(r.avg).toFixed(1)}`;
+  return `${KIND_LABEL[r.kind]} lines${who} this season: ${side === "Over" ? "overs" : "unders"} hit ${pct(side === "Over" ? r.over : r.under, 0)}, `
+    + `the average result ${avg} against the line (${r.n} graded).`;
+}
+
+/** Hit rates over slices of his games at the play's line, beside the model's chance and the posted lines' base rate:
+ *  context, since raw rates know nothing about minutes, matchups or who's out. */
+export function HitSplits({ kind, logs, side, line, opp, home, modelChance, base }: {
   kind: Kind; logs: GameLogEntry[]; side: "Over" | "Under"; line: number; opp: string; home: boolean; modelChance: number | null;
+  /** How this market's posted lines did this season (his position's where it has enough), if graded. */
+  base?: BaseRate | null;
 }) {
   const splits = hitSplits(logs, side, line, { opp, home });
-  if (!splits.length) return null;
+  if (!splits.length && !base) return null;
   return (
     <section className="hit-rates" aria-label="Hit rates">
       <h3>Hit rate · {playLabel(kind, side, line)} <Info term="hitRates" /></h3>
@@ -102,7 +120,13 @@ export function HitSplits({ kind, logs, side, line, opp, home, modelChance }: {
             <span>{s.label}</span><b>{pct(s.hit / s.n, 0)}</b><small>{s.hit}/{s.n}</small>
           </span>
         ))}
+        {base && (
+          <span className="hs base" title={baseRateText(base, side)}>
+            <span>{base.pos === "all" ? "All lines" : ({ G: "Guards", F: "Forwards", C: "Centers" }[base.pos] ?? `All ${base.pos}s`)}</span><b>{pct(side === "Over" ? base.over : base.under, 0)}</b><small>{base.n}</small>
+          </span>
+        )}
       </div>
+      {base && <p className="mut base-note">{baseRateText(base, side)} <Info term="baseRate" /></p>}
     </section>
   );
 }

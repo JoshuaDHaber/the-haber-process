@@ -119,3 +119,23 @@ def test_the_report_groups_the_board_by_shown_win_chance_for_calibration(monkeyp
     rows = [b for b in rep["by_prob"] if b["n"]]
     assert sum(b["n"] for b in rows) == 2 and sum(b["wins"] for b in rows) == 1
     assert all(b["expected_wins"] <= b["wins"] + b["losses"] for b in rows)
+
+
+def test_base_rates_count_each_posted_line_once_per_market_and_position():
+    def log(gid, pid, pos, kind, side, line, actual, result, season=2026):
+        return PickLog(season=season, week=6, game_id=gid, gameday="2026-10-18", gametime="13:00", player_id=pid, name=pid, pos=pos,
+                       team="AAA", kind=kind, side=side, line=line, odds=-110, book="X", mu=50, prob=.5, p_model=.5, p_mkt=.5,
+                       ev=0, run_id=1, actual=actual, result=result)
+    with SessionLocal() as s:
+        s.add_all([log(G1, "a", "WR", "rec", "Over", 50.5, 60, "win"), log(G1, "a", "WR", "rec", "Under", 50.5, 60, "loss"),
+                   log(G1, "b", "WR", "rec", "Over", 40.5, 30, "loss"), log(G2, "c", "TE", "rec", "Over", 30.0, 30, "push"),
+                   log(G2, "d", "TE", "rec", "Over", 30.5, None, "void"),                     # didn't play: left out
+                   log(G2, "e", "RB", "td", "Over", 0.5, 1, "win"),                           # yes/no: no base rate
+                   log(G1, "f", "WR", "rec", "Over", 10.5, 99, "win", season=2025)])          # last season
+        s.commit()
+        out = grading.base_rates(s)
+    assert out["season"] == 2026 and out["min_n"] == grading.BASE_MIN_N
+    r = {(x["kind"], x["pos"]): x for x in out["rates"]}
+    assert set(r) == {("rec", "all"), ("rec", "WR"), ("rec", "TE")}
+    assert r[("rec", "all")]["n"] == 3 and r[("rec", "all")]["over"] == pytest.approx(1 / 3) and r[("rec", "all")]["push"] == pytest.approx(1 / 3)
+    assert r[("rec", "WR")]["avg"] == pytest.approx(-0.5)   # +9.5 and -10.5

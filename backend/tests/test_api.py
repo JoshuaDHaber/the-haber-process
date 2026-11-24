@@ -624,3 +624,9 @@ def test_game_context_for_a_game_on_the_slate(client, monkeypatch):
     aaa = next(t for t in d["teams"] if t["team"] == "AAA")
     assert aaa["implied"] is None and aaa["players"][0]["name"] == "Alpha Back" and aaa["players"][0]["car_l5"] == 1.0
     assert client.get("/api/games/2026_04_XXX_YYY/context").status_code == 404
+
+
+def test_base_rates_are_public(client):
+    for path in ("/api/base-rates", "/api/nba/base-rates"):
+        r = client.get(path)
+        assert r.status_code == 200 and "rates" in r.json()

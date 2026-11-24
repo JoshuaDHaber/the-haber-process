@@ -21,7 +21,7 @@ import TrackBetSheet from "./TrackBetSheet";
 import VsDefense from "./VsDefense";
 import { FavStar } from "./icons";
 import { openSignIn } from "./SignIn";
-import { HitSplits, WhyPanel } from "./Why";
+import { HitSplits, WhyPanel, baseRateFor } from "./Why";
 
 interface Props {
   playerId: string; initialKind: Kind;
@@ -61,6 +61,8 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
   }, [data, initialKind]);
 
   // the same ladder the table shows (so it follows the sportsbook filter) gives the chart its main lines and the drawer its verdict
+  // the season's base rate for posted lines in each market: changes once a week (NFL) or a day (NBA), when games are graded
+  const baseRates = useQuery({ queryKey: ["base-rates", isNba(initialKind)], queryFn: () => api.baseRates(isNba(initialKind)), staleTime: 60 * 60_000 });
   const ladder = useQuery({ queryKey: ["ladder", playerId, kind, ODDS_RANGE, marketWeight], queryFn: () => api.lines(playerId, kind, ODDS_RANGE, marketWeight) });
   const yesNo = isYesNo(kind);
   const quotes = ladder.data?.quotes ?? [];
@@ -172,7 +174,8 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
               form={hitLine != null ? recentForm(hitSplits(allLogs, side, hitLine, { opp: proj.opp, home: proj.home })) : null} />}
 
             {hitLine != null && (
-              <HitSplits kind={kind} logs={allLogs} side={side} line={hitLine} opp={proj.opp} home={proj.home} modelChance={play ? play.q.p_model ?? play.q.prob : null} />
+              <HitSplits kind={kind} logs={allLogs} side={side} line={hitLine} opp={proj.opp} home={proj.home} modelChance={play ? play.q.p_model ?? play.q.prob : null}
+                base={yesNo ? null : baseRateFor(baseRates.data, kind, proj.pos)} />
             )}
             {!isNba(kind) && <VsDefense playerId={data.player_id} kind={kind} pos={proj.pos} opp={proj.opp} slot={proj.dvp_slot} />}
             <h3 className="log-h">

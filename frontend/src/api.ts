@@ -179,6 +179,9 @@ export interface ShareRow { player_id: string; name: string; pos: string; team: 
   rz_share: number | null; rz: number; rz_team: number; p_td: number | null; exp_td: number | null; p_td2: number | null }
 export interface TeamContext { team: string; implied: number | null; opp_implied: number | null; spread: number | null; total: number | null; script: string[]; players: ShareRow[] }
 export interface GameContext { game_id: string; teams: TeamContext[] }
+/** How this season's posted lines did per market and position (backend grading.base_rates); pos "all" = every position. */
+export interface BaseRate { kind: Kind; pos: string; n: number; over: number; under: number; push: number; avg: number }
+export interface BaseRates { season: number | null; min_n: number; rates: BaseRate[] }
 export interface HistoryPoint { at: string; line: number; books: number; p_over: number | null; p_now_line: number | null; best_over: number | null; best_under: number | null }
 /** One team's side of a game: win chance from the team model, the market (no-vig) and the blend, and the best moneyline. */
 export interface MoneylineSide {
@@ -351,6 +354,8 @@ export const api = {
   /** The league on screen's market: moves since the first fetch, steam, and quotes far from the consensus. */
   market: () => get<MarketBoard>(lg("market")),
   gameContext: (gameId: string) => get<GameContext>(lg(`games/${gameId}/context`)),
+  /** By the market's league, like history: the drawer can show either league's player. */
+  baseRates: (nba: boolean) => get<BaseRates>(`${nba ? "nba/" : ""}base-rates`),
   history: (id: string, kind: Kind) => get<HistoryPoint[]>(`${NBA_KIND_SET.has(kind) ? "nba/" : ""}players/${id}/history`, { kind }),
   injuries: () => get<InjuryReport>(lg("injuries")),
   grades: () => get<GradeReport>("grades"),
