@@ -79,7 +79,9 @@ def _dvp_cols(r) -> dict:
     """A projection row's matchup-grade columns (model.dvp_fields), None where it has none."""
     f, rank, n = (getattr(r, c, None) for c in ("dvp", "dvp_rank", "dvp_n"))
     ok = rank is not None and pd.notna(rank)
-    return dict(dvp=float(f) if ok else None, dvp_rank=int(rank) if ok else None, dvp_n=int(n) if ok else None)
+    slot = getattr(r, "dvp_slot", None)
+    return dict(dvp=float(f) if ok else None, dvp_rank=int(rank) if ok else None, dvp_n=int(n) if ok else None,
+                dvp_slot=str(slot) if ok and isinstance(slot, str) else None)
 
 
 def week_status(cur_inj: pd.DataFrame) -> dict:

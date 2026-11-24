@@ -22,8 +22,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import auth, bet_screens, bets, books, config, grading, slip_sync, market_fit, pipeline, scheduler, standings
-from .db import AltLine, OddsLine, Projection, Run, SessionLocal, SyncRun, current_lines, player_quotes, proj_frame
+from .db import AltLine, OddsLine, PickLog, Projection, Run, SessionLocal, SyncRun, current_lines, player_quotes, proj_frame
 from .engine import data, early_win, endzone, model, odds
+from .engine import dvp as dvpm
 from .engine import injuries as injm
 from .engine import moneyline as mlm
 from .engine import hot as hotm
@@ -34,7 +35,7 @@ from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
@@ -637,6 +638,47 @@ def player_lines(player_id: str, kind: Kind, odds_range: int = Query(300, ge=0, 
     return build_ladder_out(db, _player_proj(db, player_id, kind), odds_range, market_weight)
 
 
+@app.get("/api/players/{player_id}/vs-defense", response_model=VsDefenseOut)
+def player_vs_defense(player_id: str, kind: Kind, db: Session = Depends(get_db)):
+    """Players in this player's depth slot (WR2, RB1...) who faced this week's defense in its last few games: what each
+    did against it, his usual going in and, where the board logged a line for him (pick_log), that line and whether
+    it cleared. Context for the matchup grade, not an edge."""
+    p = _player_proj(db, player_id, kind)
+    return build_vs_defense(db, db.get(Run, p.run_id), p)
+
+
+@lru_cache(maxsize=1)
+def _slots(season: int) -> pd.Series:
+    """Each row of the drawer's game logs (_stats) with its depth slot (model.depth_slots)."""
+    return model.depth_slots(_stats(season))
+
+
+def build_vs_defense(db: Session, run: Run, p: Projection) -> VsDefenseOut:
+    key = p.dvp_slot or model.dvp_group(p.pos)
+    empty = VsDefenseOut(kind=p.kind, opp=p.opp, slot=key, rows=[])
+    if p.kind not in model.DVP_KINDS:
+        return empty
+    st = _stats(run.season)
+    val = model.dvp_values(st, p.kind)
+    frame = pd.DataFrame({"player_id": st.player_id, "name": st.player_display_name, "team": st.team, "opp": st.opponent_team,
+                          "t": st.t, "season": st.season, "week": st.week, "slot": _slots(run.season),
+                          "grp": st.position.map(model.dvp_group), "val": val})
+    rows = dvpm.recent_vs(frame, p.opp, key, run.season * 100 + run.week)
+    if rows.empty:
+        return empty
+    logged = db.execute(select(PickLog.season, PickLog.week, PickLog.player_id, PickLog.line)
+                        .where(PickLog.kind == p.kind, PickLog.side == "Over", PickLog.player_id.in_(rows.player_id.unique().tolist()),
+                               PickLog.season.in_(rows.season.unique().astype(int).tolist()))).all()
+    lines = {(s, w, pid): ln for s, w, pid, ln in logged}
+    out = []
+    for r in rows.itertuples():
+        ln = lines.get((int(r.season), int(r.week), r.player_id))
+        res = None if ln is None else "over" if r.val > ln else "under" if r.val < ln else "push"
+        out.append(VsDefenseRow(player_id=r.player_id, name=str(r.name), team=r.team, season=int(r.season), week=int(r.week),
+                                actual=float(r.val), usual=None if pd.isna(r.usual) else float(r.usual), line=ln, result=res))
+    return VsDefenseOut(kind=p.kind, opp=p.opp, slot=key, rows=out, games=int(rows.t.nunique()))
+
+
 @app.get("/api/players/{player_id}/history", response_model=list[HistoryPoint])
 def player_history(player_id: str, kind: Kind, db: Session = Depends(get_db)):
     """How one player's market moved this week: per odds fetch, the consensus line and its fair over chance."""
@@ -688,7 +730,7 @@ def fetch_alt_lines(player_id: str, db: Session = Depends(get_db)):
     return AltFetchResult(kinds=kinds, **res)
 
 
-_LOG_COLUMNS = ["player_id", "season", "week", "season_type", "position", "team", "opponent_team", "rushing_yards",
+_LOG_COLUMNS = ["player_id", "player_display_name", "season", "week", "season_type", "position", "team", "opponent_team", "rushing_yards",
                 "receiving_yards", "passing_yards", "receptions", "carries", "targets", "attempts", "rushing_tds", "receiving_tds", "passing_tds"]
 
 

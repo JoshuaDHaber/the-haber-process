@@ -18,6 +18,7 @@ import LineMovement from "./LineMovement";
 import Sheet from "./Sheet";
 import Skeleton from "./Skeleton";
 import TrackBetSheet from "./TrackBetSheet";
+import VsDefense from "./VsDefense";
 import { FavStar } from "./icons";
 import { openSignIn } from "./SignIn";
 import { HitSplits, WhyPanel } from "./Why";
@@ -172,6 +173,7 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
             {hitLine != null && (
               <HitSplits kind={kind} logs={allLogs} side={side} line={hitLine} opp={proj.opp} home={proj.home} modelChance={play ? play.q.p_model ?? play.q.prob : null} />
             )}
+            {!isNba(kind) && <VsDefense playerId={data.player_id} kind={kind} pos={proj.pos} opp={proj.opp} slot={proj.dvp_slot} />}
             <h3 className="log-h">
               Last {rate?.n ?? bars.filter((b) => !b.missed).length} games · {isDouble(kind) ? "stats in double figures" : kind === "ftd" ? "scored the first TD" : yesNo ? "touchdowns scored" : KIND_LABEL[kind]}
               {rate && rate.n > 0 && <span className="hit-sum">{playLabel(kind, side, hitLine!)} in <b>{rate.hit} of {rate.n}</b></span>}
