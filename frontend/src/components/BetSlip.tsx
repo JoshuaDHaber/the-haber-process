@@ -14,6 +14,7 @@ import TrackBetSheet from "./TrackBetSheet";
 import { openSignIn } from "./SignIn";
 import SidePill from "./SidePill";
 import { namesItself, KIND_SHORT, americanOdds, pct, playLabel, signedPct, timeAgo } from "../format";
+import { gamblyUrl } from "../gambly";
 import { alternativesAtBook, bookCoverage, clusterConflicts, conflicts, bookOptions, groupByBook, combinedLink, legLink, slipLinksText, linkStatus, openProgress, parlay, parseStake, priceDrift, rebook, sameGame, slipHitChance, toAmerican, toWin, withLinks, type BookOption, type Leg } from "../slip";
 
 // once per page load: the stored state covers later opens, and "Try again" re-runs it
@@ -173,6 +174,8 @@ export default function BetSlip() {
   const keepOnly = (keep: Leg, clash: Leg[]) => remove(clash.filter((l) => l.id !== keep.id).map((l) => l.id));
   // "Copy slip link" carries every book that can take its legs; a book with a clash is left out until it's fixed
   const links = slipLinksText(legs.filter((l) => !clashBooks.has(l.book)), state);
+  // "Send to Gambly": the whole slip as one parlay, which Gambly prices at every book it covers (books our links don't reach)
+  const gambly = gamblyUrl(legs);
   const clashSummary = clashes.length ? `Fix ${clashes.length} ${clashes.length === 1 ? "clash" : "clashes"} at ${[...clashBooks].join(" and ")} to place ${clashBooks.size === 1 ? "that parlay" : "those parlays"}.` : "";
   const showClash = () => {
     const el = document.querySelector<HTMLElement>(".slip-clash");
@@ -480,7 +483,24 @@ export default function BetSlip() {
                   title={!links && clashes.length ? "Keep one leg of each clash first" : links ? "Copies the sportsbook link so you can open the slip on another device" : "No betslip links to copy yet"}>
                   {copied === "link" ? "Link copied" : "Copy slip link"}
                 </button>
+                {gambly.url && !gated ? (
+                  <a className="primary outline" href={gambly.url} target="_blank" rel="noopener noreferrer"
+                    title="Builds this slip at every book Gambly covers, so you can compare prices and place it at another book"
+                    onClick={() => setPlaceMsg(`Opened Gambly with ${gambly.mapped.length} ${gambly.mapped.length === 1 ? "leg" : "legs"}${groups.length > 1 ? " as one parlay" : ""}. It picks the nearest line when a book lacks yours, so check each line there.`)}>
+                    Send to Gambly ↗
+                  </a>
+                ) : (
+                  <button className="primary outline" disabled
+                    title={gated ? "Tick the box above first: these prices are old" : "Gambly can't build any of these legs"}>Send to Gambly ↗</button>
+                )}
               </div>
+            )}
+            {legs.length > 0 && gambly.unmapped.length > 0 && (
+              <p className="mut slip-gambly-note">
+                Not sent to Gambly: {gambly.unmapped.map(({ leg: l, reason }, i) => (
+                  <span key={l.id}>{i > 0 && "; "}<b>{l.name} {playLabel(l.kind, l.side, l.line)}</b>{!namesItself(l.kind) && ` ${KIND_SHORT[l.kind]}`} ({l.book}): {reason}</span>
+                ))}.
+              </p>
             )}
             {placeMsg && <p className="mut slip-place-msg" aria-live="polite">{placeMsg}</p>}
             {legs.length > 1 && (
