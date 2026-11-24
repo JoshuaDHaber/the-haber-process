@@ -44,9 +44,10 @@ function NoPlays({ filters, onFilters }: { filters?: Filters; onFilters?: (f: Fi
 }
 
 /** picks arrive best EV first. limit shows only the top rows (after grouping) with a "Show all" button, as on the game pages.
+ *  onMore makes it a preview (a game's Overview): no one-per-player, card or sort toggles, and the button leads to the full list instead.
  *  empty: what a game page says with no props yet; the boards instead pass their filters, for buttons that loosen them. */
-export default function PicksTable({ picks, onSelect, weather = {}, empty, limit, filters, onFilters, busy = false }: { picks: Pick[]; onSelect: (p: Pick) => void; busy?: boolean;
-  weather?: Record<string, GameWeather | null | undefined>; empty?: { title: string; body: string }; limit?: number; filters?: Filters; onFilters?: (f: Filters) => void }) {
+export default function PicksTable({ picks, onSelect, weather = {}, empty, limit, onMore, filters, onFilters, busy = false }: { picks: Pick[]; onSelect: (p: Pick) => void; busy?: boolean;
+  weather?: Record<string, GameWeather | null | undefined>; empty?: { title: string; body: string }; limit?: number; onMore?: () => void; filters?: Filters; onFilters?: (f: Filters) => void }) {
   const [grouped, setGrouped] = usePref("one_per_player");
   // phones: compact cards (player, pick, win prob, EV) unless the reader asks for every number on the card
   const [detailed, setDetailed] = usePref("detailed_cards");
@@ -60,6 +61,7 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
   if (!picks.length) return empty ? <EmptyState icon={IconClock} compact title={empty.title}>{empty.body}</EmptyState> : <NoPlays filters={filters} onFilters={onFilters} />;
   return (
     <>
+    {!onMore && <>
     <label className="group-toggle mut" title="A player's picks win or lose together, so the board shows his best one and tucks the rest behind it">
       <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> One pick per player
       {grouped && rows.length < picks.length && <> · {picks.length - rows.length} related picks tucked away</>}
@@ -68,7 +70,8 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
       <input type="checkbox" checked={detailed} onChange={(e) => setDetailed(e.target.checked)} /> Every number on the cards
     </label>
     <SortBar toggle={toggle} arrow={arrow} options={[["ev", "EV"], ["prob", "Win prob"], ["edge_yds", "Edge"], ["mu", "Proj"], ["name", "Name"]]} />
-    <div className={`card scroll cards${detailed ? "" : " compact"}${busy ? " refreshing" : ""}`} aria-busy={busy}>
+    </>}
+    <div className={`card scroll cards${detailed && !onMore ? "" : " compact"}${busy ? " refreshing" : ""}`} aria-busy={busy}>
       <table className="t-picks">
         <thead>
           <tr>
@@ -120,8 +123,9 @@ export default function PicksTable({ picks, onSelect, weather = {}, empty, limit
         </tbody>
       </table>
     </div>
-    {limit !== undefined && rows.length > limit && (
-      <button className="link go-more" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${rows.length} ${grouped ? "players" : "props"}`}</button>
+    {limit !== undefined && rows.length > limit && (onMore
+      ? <button className="link go-more" onClick={onMore}>See all {rows.length} {grouped ? "players" : "props"} →</button>
+      : <button className="link go-more" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${rows.length} ${grouped ? "players" : "props"}`}</button>
     )}
     </>
   );

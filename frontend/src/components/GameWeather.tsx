@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from "react";
 import type { Game, WeatherFit } from "../api";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { SkyGlyph } from "./icons";
@@ -55,13 +56,51 @@ const ROOF_TEXT: Record<string, [string, string]> = {
   dome: ["Dome", "Played indoors: no weather adjustment."],
 };
 
-/** The selected game's kickoff weather, or its roof, shown above the props and projections for that game. */
-export default function GameWeather({ game, fit }: { game: Game; fit?: WeatherFit | null }) {
+/** A game Overview's weather on one line: sky and temperature, wind, rain and the model's adjustment, or the roof. Opens into
+ *  the full card (compass, gusts, the adjustment's reason). */
+function WeatherStrip({ game, onOpen, focus }: { game: Game; onOpen: () => void; focus: boolean }) {
+  const w = game.weather;
+  let main: ReactNode, effect: ReactNode = null;
+  if (!w) main = <span className="mut">No weather for this run yet</span>;
+  else if (w.indoor) main = <><b>{(ROOF_TEXT[w.roof] ?? ["Indoors"])[0]}</b> <span className="mut">no weather adjustment</span></>;
+  else if (w.source !== "forecast" || w.temp == null || w.wind == null) main = <span className="mut">Open air · forecast not available yet</span>;
+  else {
+    const air = wxEffect(w.factors.pass), rush = wxEffect(w.factors.rush);
+    main = <>
+      <span className="gw-strip-ico"><SkyGlyph name={skyIcon(w.sky, game.gametime)} /></span>
+      <b>{Math.round(w.temp)}°F</b> <span className="mut">{w.sky ?? "Outdoors"}</span>
+      <span className="gw-strip-dot">·</span><span>{Math.round(w.wind)} mph{w.wind_dir != null && ` ${compassPoint(w.wind_dir)}`}</span>
+      {w.precip_prob != null && <><span className="gw-strip-dot">·</span><span>{Math.round(w.precip_prob)}% rain</span></>}
+    </>;
+    effect = air || rush
+      ? <span className="gw-strip-fx">{air && <b className={w.factors.pass! < 1 ? "under" : "over"}>passing {air}</b>}{air && rush && " · "}{rush && <b className={w.factors.rush! > 1 ? "over" : "under"}>rushing {rush}</b>}</span>
+      : <span className="gw-strip-fx mut">no adjustment</span>;
+  }
+  return (
+    <button type="button" className="card gw-strip" onClick={onOpen} aria-expanded={false} autoFocus={focus} aria-label={`Weather for ${game.label}: show details`}>
+      <span className="gw-strip-main">{main}</span>{effect}<span className="gw-strip-more mut">Details</span>
+    </button>
+  );
+}
+
+/** The selected game's kickoff weather, or its roof, shown above the props and projections for that game. compact: a one-line
+ *  strip that opens into the card (a game's Overview). */
+export default function GameWeather({ game, fit, compact = false }: { game: Game; fit?: WeatherFit | null; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  // focus follows the toggle once the reader has used it, and never moves on its own when the page opens
+  const [toggled, setToggled] = useState(false);
+  const toggle = (o: boolean) => { setOpen(o); setToggled(true); };
+  if (compact && !open) return <WeatherStrip game={game} onOpen={() => toggle(true)} focus={toggled} />;
+  return <WeatherCard game={game} fit={fit} onClose={compact ? () => toggle(false) : undefined} />;
+}
+
+function WeatherCard({ game, fit, onClose }: { game: Game; fit?: WeatherFit | null; onClose?: () => void }) {
   const w = game.weather;
   const head = (
     <div className="gw-head">
       <b>{game.label}</b>
       <span className="mut">{[w?.stadium, kickoff(game.gameday, game.gametime)].filter(Boolean).join(" · ")}</span>
+      {onClose && <button type="button" className="link gw-less" onClick={onClose} aria-expanded autoFocus aria-label="Show less weather">Less</button>}
     </div>
   );
   if (!w) return <section className="card gw" aria-label="Game weather">{head}<p className="mut">No weather for this run yet. A sync fetches it.</p></section>;

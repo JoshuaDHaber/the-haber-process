@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Game, Kind } from "../api";
 import { useBetSlip } from "../BetSlipContext";
-import { americanOdds, namesItself, pct, signedPct, KIND_LABEL } from "../format";
+import { americanOdds, namesItself, pct, scrollBehavior, signedPct, KIND_LABEL } from "../format";
 import { getLeague } from "../league";
 import { pickToLeg, type Parlay, type ParlayLeg } from "../parlays";
 import type { DrawerPick } from "../playerHash";
@@ -30,7 +30,7 @@ const oneIn = (prob: number) => `about 1 in ${Math.max(1, Math.round(1 / Math.ma
 /** A tile the model expects to lose money on (a same-game parlay is priced by the book, so it has no EV of its own here). */
 const losing = (p: Parlay) => !p.sameGame && p.ev < 0;
 const tileId = (p: Parlay) => `parlay-${p.key}`;
-const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
 
 /** A player's name in a leg row: opens the player drawer on that exact play, when the page can open one. */
 function LegName({ l, onSelect }: { l: ParlayLeg; onSelect?: OnSelect }) {
@@ -153,6 +153,20 @@ function ladderRows(ladders: Parlay[], nba: boolean): { key: string; label: stri
 /** The first tile of a section worth a star: one the model doesn't expect to lose on. */
 const leadOf = (ps: Parlay[]) => ps.find((p) => !losing(p))?.key;
 
+/** A game Overview's one parlay: the first tile worth a star, taking likely plays first, then touchdowns, ladders and starters. */
+export function topParlay(sections: Parlay[][]): Parlay | null {
+  for (const ps of sections) { const k = leadOf(ps); if (k) return ps.find((p) => p.key === k)!; }
+  return null;
+}
+
+/** One parlay tile on its own (a game's Overview), sized as it is in a row. */
+export function ParlayTile({ p, onSelect }: { p: Parlay; onSelect?: OnSelect }) {
+  return <div className="parlay-row single"><ParlayCard p={p} lead onSelect={onSelect} /></div>;
+}
+
+/** "a, b and c" */
+const listOf = (xs: string[]) => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+
 /** Every tile on one screen to compare: price, hit chance and EV, each row jumping to its tile. Folded to one line until opened. */
 function Compare({ sections }: { sections: { id: string; label: string; tiles: Parlay[] }[] }) {
   // folded by default so the tiles lead the page; opening it is remembered in this browser
@@ -203,6 +217,8 @@ interface Props {
   onBook?: (b: string) => void;
   /** Open a leg's player drawer on that play. */
   onSelect?: OnSelect;
+  /** A game page: sections with nothing to show fold into one line at the end instead of an empty state each. */
+  quietEmpty?: boolean;
 }
 
 /** "Try DraftKings (3 parlays)": the book with the most likely-play parlays, as a button, when it isn't the one on screen. */
@@ -219,11 +235,23 @@ const Row = ({ tiles, onSelect, label }: { tiles: Parlay[]; onSelect?: OnSelect;
 };
 
 /** Recommended parlays at one sportsbook: tiles of high-probability plays, then ladder-style tiles, each with the combined odds. */
-export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, starterParlays, startersLoading, parlayCounts, onBook, onSelect }: Props) {
+export default function ParlayTiles({ book, games, selectedGames, onGames, parlays, tdParlays, ladders, altProps, laddersLoading, starterParlays, startersLoading, parlayCounts, onBook, onSelect, quietEmpty = false }: Props) {
   const nba = getLeague() === "nba";
   const all = [...parlays, ...tdParlays, ...ladders, ...starterParlays];
   const likeliest = all.reduce<Parlay | null>((b, p) => (!b || p.prob > b.prob ? p : b), null);
   const rows = ladderRows(ladders, nba);
+  const empties = quietEmpty ? ([
+    !parlays.length && "likely plays", !nba && !tdParlays.length && "touchdown parlays",
+    !ladders.length && !laddersLoading && "ladders", !starterParlays.length && !startersLoading && "starter parlays",
+  ].filter(Boolean) as string[]) : [];
+  const shows = (label: string) => !empties.includes(label);
+  const at = book ?? "this sportsbook";
+  if (quietEmpty && !all.length && !laddersLoading && !startersLoading && !altProps.length) return (
+    <EmptyState compact title={`No parlays at ${at} for this game yet`}>
+      Likely plays need three high-probability props from different players, and ladders and starters need alternate lines {at} links to.
+      Books post more as kickoff nears{book ? ", and another book may have some" : ""}.
+    </EmptyState>
+  );
   return (
     <>
       {onGames && <GamePills games={games} selected={selectedGames} onChange={onGames} multi label="Games to build from" />}
@@ -242,14 +270,16 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         { id: "parlays-starters", label: "Starters", tiles: starterParlays },
       ]} />
 
+      {shows("likely plays") && <>
       <h2 className="parlay-h" id="parlays-likely">Likely plays <Info term="likely" /></h2>
       {parlays.length
         ? <Row tiles={parlays} onSelect={onSelect} label="Recommended parlays" />
         : <EmptyState compact title={`Not enough likely plays at ${book ?? "one sportsbook"} to build one`} action={<TryBook book={book} counts={parlayCounts} onBook={onBook} />}>
             These need at least three high-probability plays from different players{selectedGames.length === 1 ? " in this game" : selectedGames.length ? " in the selected games" : ""}.
           </EmptyState>}
+      </>}
 
-      {!nba && <>
+      {!nba && shows("touchdown parlays") && <>
       <h2 className="parlay-h" id="parlays-td">Touchdowns <Info term="tdParlay" /></h2>
       {tdParlays.length
         ? <Row tiles={tdParlays} onSelect={onSelect} label="Touchdown parlays" />
@@ -258,6 +288,7 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
           </EmptyState>}
       </>}
 
+      {shows("ladders") && <>
       <h2 className="parlay-h" id="parlays-ladders">Ladders <Info term="ladder" /></h2>
       {ladders.length
         ? rows.map((row) => (
@@ -269,7 +300,9 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         : <EmptyState compact title={`No ladders at ${book ?? "this sportsbook"} between +100 and +300`}>
             Ladders need alternate lines with betslip links. {nba ? "NBA alternate lines come with the day-of props syncs, and not" : "Not"} every book links them, so another book may have some.
           </EmptyState>}
+      </>}
 
+      {shows("starter parlays") && <>
       <h2 className="parlay-h" id="parlays-starters">Starters <Info term="starters" /></h2>
       {starterParlays.length
         ? <Row tiles={starterParlays} onSelect={onSelect} label="Starter parlays" />
@@ -277,6 +310,11 @@ export default function ParlayTiles({ book, games, selectedGames, onGames, parla
         : <EmptyState compact title={`Not enough starters' lines at ${book ?? "this sportsbook"} to build one${selectedGames.length === 1 ? " for this game" : ""}`}>
             These need at least four players with an over priced -200 or longer that {book ?? "the book"} links to. {selectedGames.length ? "Adding games, or another book, may" : "Another book may"} turn some up.
           </EmptyState>}
+      </>}
+
+      {empties.length > 0 && (
+        <p className="mut board-note">No {listOf(empties)} at {at} for this game yet. Books add props and alternate lines as kickoff nears{book ? ", and another book may have some" : ""}.</p>
+      )}
 
       {altProps.length > 0 && <>
         <h2 className="parlay-h" id="parlays-alt">Likely alternate props <Info term="altProps" /></h2>

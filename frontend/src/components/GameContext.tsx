@@ -14,6 +14,20 @@ const arrow = (t: number, now: number, before: number | null) => t === 0 ? null 
     aria-label={t > 0 ? "up from earlier this season" : "down from earlier this season"}>{t > 0 ? "▲" : "▼"}</span>
 );
 
+/** The rundown on its own, for a game's Overview: a few plain sentences from the win chances, spread, forecast and best play.
+ *  Says what it can while the game script loads or if it fails (the rest of the numbers are on the Script tab). */
+function Rundown({ gameId, league, ml, picks, weather }: { gameId: string; league: League; ml?: MoneylineGame | null; picks?: Pick[] | null; weather?: GameWeather | null }) {
+  const q = useQuery({ queryKey: ["game-context", league, gameId], queryFn: () => api.gameContext(gameId) });
+  if (q.isPending) return <Skeleton kind="card" label="Loading the rundown…" />;
+  const said = gameRundown({ league, ml, ctx: q.data, picks, weather });
+  if (!said.length) return q.isError ? <LoadError compact what="the rundown" retry={q.refetch} /> : null;
+  return (
+    <div className={`card ctx-rundown${q.isRefetching ? " refreshing" : ""}`} aria-busy={q.isRefetching} aria-live="polite">
+      <h2 className="ctx-rundown-h">The rundown</h2><p>{said.join(" ")}</p>
+    </div>
+  );
+}
+
 /** "BUF 27.3 · KC 20.8": implied points from the spread and total, favorite first. */
 export function impliedLine(teams: TeamContext[]): string | null {
   const t = teams.filter((x) => x.implied != null);
@@ -49,14 +63,17 @@ function ShareTable({ rows, team, onSelect }: { rows: ShareRow[]; team: string; 
 /** The game page's "Game script and roles": each team's implied points and what the spread and total mean for it, and
  *  (NFL) who gets the ball: target and carry shares over the team's last 5 games with ▲/▼ against the rest of the
  *  season, share of the touches inside the 20, and the chance of 2+ touchdowns. Numbers the app already has, as context. */
-export default function GameContext({ gameId, league, onSelect, ml, picks, weather }: { gameId: string; league: League; onSelect: (id: string, kind: Kind) => void;
+export default function GameContext({ gameId, league, onSelect, ml, picks, weather, part = "all" }: { gameId: string; league: League; onSelect: (id: string, kind: Kind) => void;
   /** For the rundown: the game's win chances, its priced plays and its forecast, as the page already loaded them. */
-  ml?: MoneylineGame | null; picks?: Pick[] | null; weather?: GameWeather | null }) {
+  ml?: MoneylineGame | null; picks?: Pick[] | null; weather?: GameWeather | null;
+  /** "rundown": just the rundown card (a game's Overview); "roles": everything else (its Script tab); "all": both. */
+  part?: "all" | "rundown" | "roles" }) {
   const q = useQuery({ queryKey: ["game-context", league, gameId], queryFn: () => api.gameContext(gameId) });
   const head = (
     <h2 className="parlay-h">Game script{league === "nfl" ? " and roles" : ""} <small>from the spread and total{league === "nfl" ? ", and each team's last 5 games" : ""}</small> <Info term="gameScript" /></h2>
   );
-  const rundown = (sentences: string[]) => sentences.length > 0 && (
+  if (part === "rundown") return <Rundown gameId={gameId} league={league} ml={ml} picks={picks} weather={weather} />;
+  const rundown = (sentences: string[]) => part === "all" && sentences.length > 0 && (
     <div className="card ctx-rundown" aria-live="polite"><h3>The rundown</h3><p>{sentences.join(" ")}</p></div>
   );
   if (q.isPending) return <section id="go-ctx" className="go-sec">{head}<Skeleton kind="card" label="Loading the game script…" /></section>;
