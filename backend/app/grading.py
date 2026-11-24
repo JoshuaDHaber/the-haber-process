@@ -194,6 +194,36 @@ def _week(r) -> tuple:
     return r.week, f"Week {r.week}"
 
 
+BASE_MIN_N = 30   # graded lines a base rate needs before the drawer shows it
+
+
+def base_rates(session, table=PickLog, season: Optional[int] = None) -> dict:
+    """How the posted lines did this season, per market and per market and position: how often the result went over
+    the line, under or landed on it, and the average result minus the line. One row per player, game and market (the
+    Over and Under logs share a line), graded over/under markets only, voids left out. The same lines Model check's
+    "line's average miss" reads (report's checks)."""
+    if season is None:
+        season = session.scalars(select(table.season).order_by(table.season.desc()).limit(1)).first()
+    q = select(table.game_id, table.player_id, table.kind, table.pos, table.line, table.actual).where(
+        table.result.in_(("win", "loss", "push")), table.actual.is_not(None), table.side == "Over")
+    if season is not None:
+        q = q.where(table.season == season)
+    seen = {}
+    for gid, pid, kind, pos, line, actual in session.execute(q):
+        if kind not in YES_NO:
+            seen[(gid, pid, kind)] = (kind, pos, float(line), float(actual))
+    groups = {}
+    for kind, pos, line, actual in seen.values():
+        for key in ((kind, "all"), (kind, pos)):
+            groups.setdefault(key, []).append(actual - line)
+    rates = []
+    for (kind, pos), d in sorted(groups.items()):
+        n = len(d)
+        rates.append(dict(kind=kind, pos=pos, n=n, over=sum(x > 0 for x in d) / n, under=sum(x < 0 for x in d) / n,
+                          push=sum(x == 0 for x in d) / n, avg=sum(d) / n))
+    return dict(season=season, min_n=BASE_MIN_N, rates=rates)
+
+
 def report(session, season: Optional[int] = None, table=PickLog, period: Callable = _week) -> dict:
     """How the board did once graded: record and units for what a visitor saw (Min EV 3%, flags hidden), split by
     market, side, EV and period, plus whether the model or the posted line landed closer to the result, per market.

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import books, config, market_fit, standings
-from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, current_lines, player_quotes
+from ..db import NbaPickLog, NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, current_lines, player_quotes
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import dvp as dvp_mod
@@ -21,7 +21,8 @@ from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, lad
 from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
-from ..schemas import (GameContext, SoftSpot, MarketBoard, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
+from ..grading import base_rates as base_rates_for
+from ..schemas import (GameContext, BaseRates, SoftSpot, MarketBoard, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
                        LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, NbaSlate, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
 from . import espn, grading, king, lead, model
 from . import odds as nba_odds
@@ -268,6 +269,12 @@ def correlations(db: Session = Depends(get_db)):
 def build_correlations(run: Optional[NbaRun]) -> Correlations:
     c = ((run.variance or {}).get("_correlation") if run else None) or {}
     return Correlations(pairs={k: v[0] for k, v in (c.get("pairs") or {}).items()}, check=c.get("check") or {})
+
+
+@router.get("/base-rates", response_model=BaseRates)
+def base_rates(db: Session = Depends(get_db)):
+    """GET /api/base-rates for the NBA's graded board (nba_pick_log)."""
+    return base_rates_for(db, NbaPickLog)
 
 
 @router.get("/grades", response_model=GradeReport)

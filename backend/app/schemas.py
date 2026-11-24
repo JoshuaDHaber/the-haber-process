@@ -400,6 +400,23 @@ class GameContext(BaseModel):
     teams: list[TeamContext]
 
 
+class BaseRate(BaseModel):
+    kind: str
+    pos: str              # "all", or the position
+    n: int                # graded lines
+    over: float           # share where the result went over the posted line
+    under: float
+    push: float
+    avg: float            # average result minus the line (+ = the line ran low)
+
+
+class BaseRates(BaseModel):
+    """How this season's posted lines did, per market and position (grading.base_rates)."""
+    season: Optional[int] = None
+    min_n: int
+    rates: list[BaseRate]
+
+
 class GameLogEntry(BaseModel):
     label: str
     opp: str
