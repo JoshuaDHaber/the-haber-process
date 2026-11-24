@@ -107,7 +107,7 @@ button.primary:disabled { opacity: .55; cursor: default; }
 .slip-price-msg { margin: 12px 0 0; padding: 0; font-size: 13px; } .slip-price-msg:empty { display: none; }
 .slip-alert { display: inline-block; margin-left: 6px; min-width: 20px; border-radius: 999px; background: var(--bad); color: #fff; text-align: center; }
 .add.clash { border-color: var(--bad); color: var(--bad); }
-.slip-footer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; } .slip-place-msg { font-size: 12px; margin: -4px 0 0; } .slip-disclaimer { margin-top: 18px; }
+.slip-footer { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; } .slip-place-msg, .slip-gambly-note { font-size: 12px; margin: -4px 0 0; } .slip-gambly-note + .slip-place-msg { margin-top: 6px; } .slip-disclaimer { margin-top: 18px; }
 .slip-stake { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .slip-stake .chips { margin: 0; gap: 4px; }
 .slip-stake .chip-btn { padding: 4px 8px; } .chip-btn[aria-pressed="true"] { border-color: var(--acc); background: var(--chip); font-weight: 600; }
 /* a quiet destructive action, kept apart from Place and Copy */
@@ -129,7 +129,7 @@ button.primary:disabled { opacity: .55; cursor: default; }
 .chip-btn { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; font: inherit; font-size: 12px; cursor: pointer; }
 .chip-btn:hover { border-color: var(--acc); }
 .open-msg { padding-top: 8px; }
-button.primary.outline { background: transparent; color: var(--acc); border: 1px solid var(--acc); } a.link { text-decoration: none; }
+button.primary.outline, a.primary.outline { background: transparent; color: var(--acc); border: 1px solid var(--acc); } a.link { text-decoration: none; }
 .more-rows { display: flex; justify-content: center; margin: 14px 0 4px; }
 .book-note { background: var(--chip); color: var(--ink); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; font-size: 12px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .banner a { color: inherit; text-decoration: underline; }
