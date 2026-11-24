@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type Kind, type ShareRow, type TeamContext } from "../api";
+import { api, type GameWeather, type Kind, type MoneylineGame, type Pick, type ShareRow, type TeamContext } from "../api";
+import { gameRundown } from "../read";
 import { pct } from "../format";
 import type { League } from "../league";
 import EmptyState, { LoadError } from "./EmptyState";
@@ -48,23 +49,32 @@ function ShareTable({ rows, team, onSelect }: { rows: ShareRow[]; team: string; 
 /** The game page's "Game script and roles": each team's implied points and what the spread and total mean for it, and
  *  (NFL) who gets the ball: target and carry shares over the team's last 5 games with ▲/▼ against the rest of the
  *  season, share of the touches inside the 20, and the chance of 2+ touchdowns. Numbers the app already has, as context. */
-export default function GameContext({ gameId, league, onSelect }: { gameId: string; league: League; onSelect: (id: string, kind: Kind) => void }) {
+export default function GameContext({ gameId, league, onSelect, ml, picks, weather }: { gameId: string; league: League; onSelect: (id: string, kind: Kind) => void;
+  /** For the rundown: the game's win chances, its priced plays and its forecast, as the page already loaded them. */
+  ml?: MoneylineGame | null; picks?: Pick[] | null; weather?: GameWeather | null }) {
   const q = useQuery({ queryKey: ["game-context", league, gameId], queryFn: () => api.gameContext(gameId) });
   const head = (
     <h2 className="parlay-h">Game script{league === "nfl" ? " and roles" : ""} <small>from the spread and total{league === "nfl" ? ", and each team's last 5 games" : ""}</small> <Info term="gameScript" /></h2>
   );
+  const rundown = (sentences: string[]) => sentences.length > 0 && (
+    <div className="card ctx-rundown" aria-live="polite"><h3>The rundown</h3><p>{sentences.join(" ")}</p></div>
+  );
   if (q.isPending) return <section id="go-ctx" className="go-sec">{head}<Skeleton kind="card" label="Loading the game script…" /></section>;
-  if (q.isError && !q.data) return <section id="go-ctx" className="go-sec">{head}<LoadError compact what="the game script" retry={q.refetch} /></section>;
+  if (q.isError && !q.data) return (
+    <section id="go-ctx" className="go-sec">{head}{rundown(gameRundown({ league, ml, picks, weather }))}<LoadError compact what="the game script" retry={q.refetch} /></section>
+  );
   const teams = q.data.teams;
+  const said = gameRundown({ league, ml, ctx: q.data, picks, weather });
   const line = impliedLine(teams);
   if (!line && !teams.some((t) => t.players.length)) return (
-    <section id="go-ctx" className="go-sec">{head}
+    <section id="go-ctx" className="go-sec">{head}{rundown(said)}
       <EmptyState compact title="No spread or total for this game yet">Implied points and the script read show once the books post a line.</EmptyState>
     </section>
   );
   return (
     <section id="go-ctx" className={`go-sec${q.isRefetching ? " refreshing" : ""}`} aria-busy={q.isRefetching}>
       {head}
+      {rundown(said)}
       {!line && <p className="mut board-note">No spread or total yet, so no implied points: they show once the books post a line.</p>}
       {league === "nba" ? (
         <div className="card ctx-team">

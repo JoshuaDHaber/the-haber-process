@@ -3,6 +3,7 @@ import { americanOdds, effText, fmtProj, isDouble, isYesNo, pct, playLabel, sign
 import { hitSplits } from "../gameLog";
 import type { Cell } from "./LineLadder";
 import Info from "./Info";
+import { propRead } from "../read";
 import MatchupGrade, { matchupGrade, matchupText } from "./MatchupGrade";
 
 const mult = (x: number) => `${x >= 1 ? "+" : "−"}${Math.abs((x - 1) * 100).toFixed(0)}%`;
@@ -40,7 +41,9 @@ function buildSteps(kind: Kind, proj: Projection, nba: boolean): Step[] {
 }
 
 /** "Why this number": what the projection is built from, then how it becomes a win chance and an EV at this price. */
-export function WhyPanel({ kind, proj, play, curveWeight, nba }: { kind: Kind; proj: Projection; play: Cell | null; curveWeight: number | null | undefined; nba: boolean }) {
+export function WhyPanel({ kind, proj, play, curveWeight, nba, form }: { kind: Kind; proj: Projection; play: Cell | null; curveWeight: number | null | undefined; nba: boolean;
+  /** His record at the play's line over recent games, for the read. */
+  form?: { label: string; hit: number; n: number } | null }) {
   const yesNo = isYesNo(kind);
   const steps = yesNo ? [] : buildSteps(kind, proj, nba);
   const q = play?.q;
@@ -52,6 +55,8 @@ export function WhyPanel({ kind, proj, play, curveWeight, nba }: { kind: Kind; p
     <section className="why" aria-label="Why this number">
       <h3>Why {yesNo ? "this chance" : `${fmtProj(kind, proj.mu)} ${unit(kind)}`}</h3>
       <div className="card why-card">
+        <p className="why-read" aria-label="The read">{propRead({ kind, proj, form, matchup: grade,
+          play: play ? { side: play.side, line: play.row.line, book: play.row.book, q: play.q } : null }).join(" ")}</p>
         {steps.length > 0 && (
           <ol className="why-steps">
             {steps.map((s) => (

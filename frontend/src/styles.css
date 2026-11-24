@@ -1224,3 +1224,5 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .ctx-meta { display: block; font-size: 11px; font-weight: 400; }
 .ctx-trend { font-size: 10px; margin-left: 3px; } .ctx-trend.up { color: var(--good); } .ctx-trend.down { color: var(--bad); }
 .ctx-both { flex-wrap: wrap; gap: 8px 18px; } .ctx-side { display: inline-flex; align-items: center; gap: 8px; } .ctx-side .ctx-pts { margin-left: 4px; }
+.why-read { margin: 10px 0 6px; font-size: 13px; line-height: 1.5; }
+.ctx-rundown { padding: 12px 14px; border-radius: 16px; } .ctx-rundown h3 { margin: 0 0 6px; font-size: 14px; } .ctx-rundown p { margin: 0; font-size: 13px; line-height: 1.55; }
