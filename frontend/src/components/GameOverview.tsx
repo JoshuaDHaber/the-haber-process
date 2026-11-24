@@ -68,6 +68,12 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
     queryFn: () => api.picks({ ...PARLAY_FILTERS, kind: propKind, game: id, book, marketWeight, minEv: 0 }, 300),
     placeholderData: (p) => p,
   });
+  // every priced play for the game, for the rundown (the same cache entry as the props table on "All")
+  const allPicks = useQuery({
+    queryKey: ["game-picks", id, "all", book, marketWeight],
+    queryFn: () => api.picks({ ...PARLAY_FILTERS, kind: "all", game: id, book, marketWeight, minEv: 0 }, 300),
+    enabled: propKind !== "all",
+  });
   const projections = useQuery({
     queryKey: ["game-projections", id, projKind],
     queryFn: () => api.projections({ ...PARLAY_FILTERS, kind: projKind, game: id }),
@@ -99,7 +105,7 @@ export default function GameOverview({ game, books, book, onBook, marketWeight, 
         {ml ? <MoneylineCard g={ml} records={game.records} /> : moneylines.isLoading ? <Skeleton kind="card" label="Loading win chances…" /> : moneylines.error && !moneylines.data ? <LoadError compact what="win chances" retry={moneylines.refetch} /> : <EmptyState icon={IconClock} compact title="No win chances for this game yet">{checkBack()}</EmptyState>}
       </div>
 
-      <GameContext gameId={id} league="nfl" onSelect={onSelect} />
+      <GameContext gameId={id} league="nfl" onSelect={onSelect} ml={ml} weather={game.weather} picks={propKind === "all" ? picks.data : allPicks.data} />
 
       <section id="go-props" className="go-sec">
         <h2 className="parlay-h">Best props <small>positive EV for this game{book !== "all" ? ` at ${book}` : ""}</small></h2>

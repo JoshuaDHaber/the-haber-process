@@ -8,7 +8,7 @@ import { MAX_FAV_PLAYERS, toggleFavPlayer, useFavorites } from "../favorites";
 import { getLeague } from "../league";
 import { DOUBLE_NEED, isDouble, isYesNo, KIND_LABEL, KIND_SHORT, americanOdds, effText, fmtEdge, fmtProj, fmtSd, isCount, isNba, matchup, pct, playLabel, signedPct,
   timeAgo, unit, volLabel, weatherText, wxEffect } from "../format";
-import { hitRate, hits, seasonStarts, withGaps, type LogBar } from "../gameLog";
+import { hitRate, hitSplits, hits, seasonStarts, withGaps, type LogBar } from "../gameLog";
 import { useOverflowFade } from "../useOverflowFade";
 import type { DrawerPick } from "../playerHash";
 import Avatar from "./Avatar";
@@ -168,7 +168,8 @@ export default function PlayerDrawer({ playerId, initialKind, pick, marketWeight
                 : yesNo ? <>Touches <b>{proj.vol.toFixed(1)}</b> · TDs per touch <b>{(proj.eff / Math.max(proj.vol, 0.1)).toFixed(3)}</b></>
                 : <>Std dev <b>{fmtSd(kind, proj.sd)}</b> · {volLabel(kind)} <b>{proj.vol.toFixed(1)}</b> · {effText(kind, proj.eff)[0]} <b>{effText(kind, proj.eff)[1]}</b></>}
             </p>}
-            {!proj.thin && <WhyPanel kind={kind} proj={proj} play={play} curveWeight={boardRow && picked === play ? boardRow.w ?? ladder.data?.w : ladder.data?.w} nba={isNba(kind)} />}
+            {!proj.thin && <WhyPanel kind={kind} proj={proj} play={play} curveWeight={boardRow && picked === play ? boardRow.w ?? ladder.data?.w : ladder.data?.w} nba={isNba(kind)}
+              form={hitLine != null ? recentForm(hitSplits(allLogs, side, hitLine, { opp: proj.opp, home: proj.home })) : null} />}
 
             {hitLine != null && (
               <HitSplits kind={kind} logs={allLogs} side={side} line={hitLine} opp={proj.opp} home={proj.home} modelChance={play ? play.q.p_model ?? play.q.prob : null} />
@@ -334,6 +335,10 @@ function FavButton({ player }: { player: { player_id: string; name: string; pos:
     </>
   );
 }
+
+/** The read's form line: his last 10 at the line, or his last few when he has fewer. */
+const recentForm = (splits: { label: string; hit: number; n: number }[]) =>
+  splits.find((s) => s.label === "Last 10") ?? splits.find((s) => s.label.startsWith("Last ") && s.label !== "Last season") ?? null;
 
 interface BoardRow { player_id: string; kind: string; side: string; line: number; book: string; odds: number; prob: number; ev: number; p_model?: number | null; p_mkt?: number | null; w?: number | null }
 /** The board row (Best props, the games' top props, Who's Hot) this play was opened from, if a board on this page has it

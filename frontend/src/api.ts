@@ -100,6 +100,8 @@ export interface Projection {
   /** NFL receiving: the cut for a starting QB who passes less efficiently than the QBs in the team's recent games
    *  (backend model.qb_fields), already in mu, and that QB's name. Null / "" with no cut. */
   qb_adj?: number | null; qb_name?: string | null;
+  /** Same-position rotation players in their first game out (backend redistribute.teammates_out). */
+  teammate_out?: string | null;
   /** NBA: what mu is made of. min: minutes from his own games; tm_min: the teammates-out multiplier on them; rate: his
    *  per-minute rate (shrunk to his position); opp: the opponent's factor; tm: the whole teammates-out multiplier on the
    *  stat; out: the absent regulars counted (missed: team games already missed). Doubles carry only min, tm_min and out. */
