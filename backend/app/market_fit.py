@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 
 from .db import BetLeg, NbaPickLog, NbaRun, OddsHistory, PickLog, PickSnap, Run, Setting
 from .engine import market as mkt
@@ -426,3 +426,116 @@ def ladder_weight(market_weight: Optional[float], fitted: Optional[dict], p, mai
         hours = float(h.min()) if len(h) and pd.notna(h.min()) else None
         market_weight = mkt.weight_for(fitted, p.kind, hours)
     return max(market_weight, MIN_MARKET_WEIGHT.get(p.kind, 0.0))
+
+
+# ---------- the slate's market board ----------
+MOVER_PTS = 0.04       # a line whose fair over chance (at today's line) moved this far since the first fetch is a mover
+FLAT_PTS = 0.015       # ... and one that moved less than this, with the same line, over 3+ fetches, is flat
+OUTLIER_EV = 0.04      # a quote this much better than the consensus says it's worth stands out from the market
+OUTLIER_MAX_ODDS = 300  # prices past -300/+300 aren't called out (a long shot's thin fair chance makes its EV noise)
+OUTLIER_LINE = 0.10    # ... or a main line this far from the consensus line (share of it; whole units for small counts)
+
+
+def _off_line(kind: str, cons: float) -> float:
+    """How far a book's main line sits from the consensus before it's called out (0 for yes/no markets)."""
+    return 0.0 if kind in YES_NO else max(OUTLIER_LINE * cons, 1.0)
+
+
+def slate_market(session, sport: str, game_ids, proj: pd.DataFrame, dists_: dict, names: Optional[dict] = None) -> dict:
+    """The slate's market in one read of odds_history (no Odds API calls): for every player and market quoted at the
+    first and the latest fetch of his game, the consensus line then and now, how far the fair chance of the over at
+    TODAY'S line has moved (the earlier consensus moved along the model's slope, as add_moves does), books and steam
+    between the last two fetches; plus the latest fetch's main quotes that sit far from the consensus (a line off by
+    OUTLIER_LINE or a price OUTLIER_EV better than the consensus says that side is worth at that line).
+    names: player key -> (player_id, name, team, pos) from the run, for the drawer links."""
+    hist = history(session, game_ids)
+    out = dict(moves=[], outliers=[], fetches=0, first_at=None, last_at=None, movers=0, flat=0)
+    if hist.empty:
+        return out
+    hist = hist.assign(key=hist.player.map(odds.norm))
+    hist = hist[hist.market != "ml"]
+    p_over = model_p_over(proj, dists_)
+    weights = book_weights(session, sport)
+    names = names or {}
+    pm = {(odds.norm(r.name), r.kind): (float(r.mu), float(r.sd)) for r in proj.itertuples()} if not proj.empty else {}
+    out.update(fetches=int(hist.fetched_at.nunique()), first_at=pd.Timestamp(hist.fetched_at.min()).isoformat(),
+               last_at=pd.Timestamp(hist.fetched_at.max()).isoformat())
+    for (gid, market), h in hist.groupby(["game_id", "market"]):
+        times = sorted(h.fetched_at.unique())
+        last = h[h.fetched_at == times[-1]]
+        c1 = mkt.consensus(last, p_over, weights, HOLD, stale_gap)
+        c0 = mkt.consensus(h[h.fetched_at == times[0]], p_over, weights, HOLD, stale_gap) if len(times) > 1 else None
+        st = {}
+        if len(times) > 1:
+            prev, cur = (mkt.book_fairs(h[h.fetched_at == t], p_over, weights, HOLD, stale_gap) for t in times[-2:])
+            st = {k: int(v) for k, v in mkt.steam(prev, cur, p_over).items()}
+        n_fetch = h.groupby("key").fetched_at.nunique()
+        for (key, _), now in c1.iterrows():
+            who = names.get(key)
+            if who is None:
+                continue
+            mu, sd = pm.get((key, market), (None, None))
+            dist = dists_.get(market)
+            row = dict(game_id=gid, kind=market, player_id=who[0], name=who[1], team=who[2], pos=who[3], line=float(now.line),
+                       books=int(now.books), p_over=None if pd.isna(now.nv_o) else float(now.nv_o), fetches=int(n_fetch.get(key, 1)),
+                       open_line=None, move=None, steam=st.get((key, market), 0))
+            if c0 is not None and (key, market) in c0.index and mu is not None:
+                o = c0.loc[(key, market)]
+                if pd.notna(o.nv_o) and pd.notna(now.nv_o):
+                    row["open_line"] = float(o.line)
+                    row["move"] = float(now.nv_o) - closing_over(o, float(now.line), market, mu, sd, dist)
+            out["moves"].append(row)
+        # quotes at the latest fetch far from the consensus: a stale or off-market line, or a price the market disagrees with.
+        # Over/under markets only: a yes/no long shot's fair chance is a point or two, so its "EV" is mostly noise
+        if market in YES_NO:
+            continue
+        for q in mkt.main_quotes(last).itertuples():
+            if (q.key, market) not in c1.index or q.key not in names or (q.key, market) not in pm:
+                continue
+            cons = c1.loc[(q.key, market)]
+            # past the stale-line gap the quote is another line (an alternate in the main feed), and its "EV" would rest
+            # on the model's curve far from where the market priced it
+            if pd.isna(cons.nv_o) or abs(float(q.line) - float(cons.line)) > stale_gap(market, float(cons.line)):
+                continue
+            mu, sd = pm[(q.key, market)]
+            p = closing_over(cons, float(q.line), market, mu, sd, dists_.get(market))   # the market's fair over at this book's line
+            best = None
+            for side, price, prob in (("Over", q.over_odds, p), ("Under", q.under_odds, 1 - p)):
+                if price is None or pd.isna(price) or abs(price) > OUTLIER_MAX_ODDS:
+                    continue
+                ev = prob * float(odds.american_to_dec(price)) - 1
+                if best is None or ev > best[2]:
+                    best = (side, int(price), ev, prob)
+            if best is None:
+                continue
+            gap = float(q.line) - float(cons.line)
+            off = market not in YES_NO and abs(gap) >= _off_line(market, float(cons.line))
+            if best[2] < OUTLIER_EV and not (off and best[2] >= 0):   # an off line that's merely juiced isn't news
+                continue
+            who = names[q.key]
+            out["outliers"].append(dict(game_id=gid, kind=market, player_id=who[0], name=who[1], team=who[2], pos=who[3],
+                                        book=q.book, line=float(q.line), consensus=float(cons.line), side=best[0], odds=best[1],
+                                        fair=float(best[3]), ev=float(best[2]), books=int(cons.books)))
+    moved = [r["move"] for r in out["moves"] if r["move"] is not None]
+    out["movers"] = sum(abs(m) >= MOVER_PTS or False for m in moved)
+    out["flat"] = sum(abs(r["move"]) < FLAT_PTS and r["open_line"] == r["line"] and r["fetches"] >= 3
+                      for r in out["moves"] if r["move"] is not None)
+    out["moves"].sort(key=lambda r: -abs(r["move"] or 0))
+    out["outliers"].sort(key=lambda r: -r["ev"])
+    return out
+
+
+_market_cache: dict = {}
+
+
+def cached_board(db, run_id: int, proj: pd.DataFrame, dists_: dict, sport: str, game_ids: list) -> dict:
+    """slate_market, memoized per (league, run, games, newest stored fetch)."""
+    last = db.scalar(select(sa_func.max(OddsHistory.fetched_at)).where(OddsHistory.game_id.in_(game_ids))) if game_ids else None
+    key = (sport, run_id, tuple(sorted(game_ids)), last)
+    if key not in _market_cache:
+        if len(_market_cache) > 8:
+            _market_cache.clear()
+        p = proj[proj.game_id.isin(game_ids)] if not proj.empty else proj
+        names = {odds.norm(r.name): (r.player_id, r.name, r.team, r.pos) for r in p.itertuples()} if not p.empty else {}
+        _market_cache[key] = slate_market(db, sport, game_ids, p, dists_, names)
+    return _market_cache[key]

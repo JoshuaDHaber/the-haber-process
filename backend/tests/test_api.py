@@ -605,3 +605,9 @@ def test_soft_spots_answer_with_or_without_grades(client):
     r = client.get("/api/soft-spots")
     assert r.status_code == 200 and isinstance(r.json(), list)
     assert client.get("/api/nba/soft-spots").status_code == 200
+def test_market_board_answers_from_stored_history_only(client, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "ODDS_API_KEY", lambda: (_ for _ in ()).throw(AssertionError("no Odds API calls")))
+    for path in ("/api/market", "/api/nba/market"):
+        r = client.get(path)
+        assert r.status_code == 200 and set(r.json()) >= {"moves", "outliers", "fetches"}

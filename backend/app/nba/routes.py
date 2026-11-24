@@ -21,7 +21,7 @@ from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, lad
 from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
-from ..schemas import (SoftSpot, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
+from ..schemas import (SoftSpot, MarketBoard, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
                        LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, NbaSlate, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
 from . import espn, grading, king, lead, model
 from . import odds as nba_odds
@@ -146,6 +146,14 @@ def soft_spots(db: Session = Depends(get_db)):
     if proj.empty:
         return []
     return dvp_mod.soft_spots(proj[proj.game_id.isin(live) & proj.kind.isin(SPOT_KINDS)])
+@router.get("/market", response_model=MarketBoard)
+def market_board(db: Session = Depends(get_db)):
+    """The slate's market from stored odds history (no Odds API credits), as GET /api/market."""
+    run = latest_run(db)
+    live = [g["game_id"] for g in _upcoming(run)] if run else []
+    if not live:
+        return MarketBoard(moves=[], outliers=[])
+    return market_fit.cached_board(db, run.id, _proj_frame(db, run.id), _dists(run), "nba", live)
 
 
 @router.get("/projections", response_model=list[ProjectionOut])

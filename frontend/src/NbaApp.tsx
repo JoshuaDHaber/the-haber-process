@@ -27,6 +27,7 @@ import PicksTable from "./components/PicksTable";
 import PlayerCompare from "./components/PlayerCompare";
 import ProjectionsTable from "./components/ProjectionsTable";
 import SoftSpots from "./components/SoftSpots";
+import MarketBoard from "./components/MarketBoard";
 import EmptyState, { LoadError } from "./components/EmptyState";
 import KingBoard from "./components/KingBoard";
 import TokenBoard from "./components/TokenBoard";
@@ -47,18 +48,18 @@ import { orderTabs, PREFERRED_GAME_BOOK, useBoardBook, usePref } from "./prefs";
 const PlayerDrawer = lazy(() => importOrReload(() => import("./components/PlayerDrawer")));
 const AdminPage = lazy(() => importOrReload(() => import("./components/AdminPage")));
 
-type Tab = "games" | "picks" | "hot" | "parlays" | "promos" | "injuries" | "spots" | "projections" | "compare" | "check" | "admin" | "account" | "bets";
-const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["promos", "Promos"], ["injuries", "Injuries"], ["spots", "Soft spots"], ["projections", "Projections"], ["compare", "Compare"],
+type Tab = "games" | "picks" | "hot" | "parlays" | "promos" | "injuries" | "spots" | "market" | "projections" | "compare" | "check" | "admin" | "account" | "bets";
+const TABS: [Tab, string][] = [["games", "Games"], ["picks", "Best props"], ["parlays", "Parlays"], ["hot", "Who's Hot"], ["promos", "Promos"], ["injuries", "Injuries"], ["spots", "Soft spots"], ["market", "Market"], ["projections", "Projections"], ["compare", "Compare"],
   ["check", "Model check"], ["admin", "Admin"]];
 /** Sections under the top bar's More menu. */
-const MORE: Tab[] = ["promos", "injuries", "spots", "compare", "check", "admin"];
+const MORE: Tab[] = ["promos", "injuries", "spots", "market", "compare", "check", "admin"];
 /** Sections only the site owner sees (signed in with an ADMIN_EMAILS account): meta.can_write. */
 const OWNER_ONLY: Tab[] = ["check", "admin"];
 /** Each section's path under /nba: /nba/props, /nba/parlays, ... (Games is the front page). */
-const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", promos: "promos", injuries: "injuries", spots: "soft-spots", projections: "projections", compare: "compare",
+const SLUGS: Record<Tab, string> = { games: "", picks: "props", hot: "hot", parlays: "parlays", promos: "promos", injuries: "injuries", spots: "soft-spots", market: "market", projections: "projections", compare: "compare",
   check: "model", admin: "admin", account: "account", bets: "bets" };
 /** Each section's page title (Best props and Parlays add their sportsbook picker). */
-const TITLE: Record<Tab, string> = { games: "Games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", promos: "Promos", injuries: "Injury report", spots: "Soft spots", projections: "Projections",
+const TITLE: Record<Tab, string> = { games: "Games", picks: "Best props", hot: "Who's Hot", parlays: "Parlays", promos: "Promos", injuries: "Injury report", spots: "Soft spots", market: "Prop market", projections: "Projections",
   compare: "Compare players", check: "Model check", admin: "Admin", account: "Preferences", bets: "My bets" };
 /** The book promotions the Promos page prices, each behind a pill. */
 type Promo = "early-win" | "king";
@@ -259,7 +260,8 @@ export default function NbaApp() {
             tdParlays={board.tdParlays} ladders={board.ladders} altProps={board.altProps} laddersLoading={board.laddersLoading} starterParlays={board.starterParlays} startersLoading={board.startersLoading} onSelect={select} />)}
         {tab === "injuries" && (injuries.isLoading ? <Skeleton kind="cards" count={2} /> : injuries.error || !injuries.data ? <LoadError what="the injury report" retry={injuries.refetch} /> :
           <NbaInjuries report={injuries.data} games={dateGames} onSelect={select} />)}
-        {tab === "spots" && <SoftSpots league="nba" onSelect={(id, kind) => select(id, kind)} />}
+        {tab === "spots" && <SoftSpots league="nba" gameIds={dateGames.map((g) => g.game_id)} onSelect={(id, kind) => select(id, kind)} />}
+        {tab === "market" && <MarketBoard league="nba" gameIds={dateGames.map((g) => g.game_id)} onSelect={(id, kind) => select(id, kind)} />}
         {tab === "projections" && (projections.isLoading ? <Skeleton kind="rows" /> : projections.error && !projections.data ? <LoadError what="projections" retry={projections.refetch} /> :
           <ProjectionsTable nba rows={projections.data ?? []} busy={projections.isPlaceholderData} filters={filters} onSelect={(p) => select(p.player_id, p.kind)} />)}
         {tab === "compare" && <PlayerCompare onSelect={select} />}

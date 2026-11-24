@@ -32,14 +32,21 @@ export function spotText(s: SoftSpot): { allowed: string | null; vsUsual: string
 
 /** "Soft spots": the slate's defenses ranked by how much they give up to each depth slot (NFL) or position (NBA) in a
  *  market, against what those players usually do, with the slate's players who line up there. Context, not an edge. */
-export default function SoftSpots({ league, onSelect }: { league: League; onSelect: (id: string, kind: Kind) => void }) {
+export default function SoftSpots({ league, onSelect, gameIds }: { league: League; onSelect: (id: string, kind: Kind) => void;
+  /** NBA: the games of the date picked at the top of the page (all of them when omitted). */
+  gameIds?: string[] }) {
   const q = useQuery({ queryKey: ["soft-spots", league], queryFn: api.softSpots });
   const [kind, setKind] = useState<Kind>(MARKETS[league][0]);
   const [group, setGroup] = useState<string>("all");
   const [all, setAll] = useState(false);
-  const rows = useMemo(() => (q.data ?? []).filter((s) => s.kind === kind && (group === "all" || s.key.replace(/\d$/, "") === group)), [q.data, kind, group]);
+  const keep = gameIds?.join();
+  const spots = useMemo(() => {
+    const ids = keep != null ? new Set(keep.split(",")) : null;
+    return ids ? (q.data ?? []).map((s) => ({ ...s, players: s.players.filter((p) => ids.has(p.game_id)) })).filter((s) => s.players.length) : q.data ?? [];
+  }, [q.data, keep]);
+  const rows = useMemo(() => spots.filter((s) => s.kind === kind && (group === "all" || s.key.replace(/\d$/, "") === group)), [spots, kind, group]);
   const { ref, onScroll, className: fade } = useOverflowFade<HTMLDivElement>("button.on", [kind, !!q.data]);
-  const groups = GROUPS[league].filter((g) => (q.data ?? []).some((s) => s.kind === kind && s.key.replace(/\d$/, "") === g));
+  const groups = GROUPS[league].filter((g) => spots.some((s) => s.kind === kind && s.key.replace(/\d$/, "") === g));
   if (q.isPending) return <Skeleton kind="cards" label="Loading soft spots…" />;
   if (q.isError && !q.data) return <LoadError what="soft spots" retry={q.refetch} />;
   if (!q.data?.length) return (
@@ -53,7 +60,7 @@ export default function SoftSpots({ league, onSelect }: { league: League; onSele
       <div className="spots-controls">
         <div ref={ref} onScroll={onScroll} className={`seg small${fade}`} role="group" aria-label="Market">
           {MARKETS[league].map((k) => (
-            <button type="button" key={k} className={kind === k ? "on" : ""} aria-pressed={kind === k} onClick={() => { setKind(k); setAll(false); if (group !== "all" && !q.data.some((s) => s.kind === k && s.key.replace(/\d$/, "") === group)) setGroup("all"); }}>
+            <button type="button" key={k} className={kind === k ? "on" : ""} aria-pressed={kind === k} onClick={() => { setKind(k); setAll(false); if (group !== "all" && !spots.some((s) => s.kind === k && s.key.replace(/\d$/, "") === group)) setGroup("all"); }}>
               {KIND_SHORT[k]}
             </button>
           ))}

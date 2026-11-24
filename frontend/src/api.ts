@@ -164,6 +164,13 @@ export interface VsDefense { kind: Kind; opp: string; slot: string; games: numbe
 export interface SoftSpotPlayer { player_id: string; name: string; team: string; pos: string; mu: number; game_id: string }
 export interface SoftSpot { defense: string; key: string; kind: Kind; factor: number; rank: number; n: number; grade: string;
   allowed: number | null; games: number | null; league: number | null; players: SoftSpotPlayer[] }
+/** The slate's market from stored odds history (backend market_fit.slate_market). move: the fair chance of the over at
+ *  today's line, now minus the first fetch (+ = toward the over). */
+export interface MarketMove { game_id: string; kind: Kind; player_id: string; name: string; team: string; pos: string; line: number; books: number;
+  p_over: number | null; fetches: number; open_line: number | null; move: number | null; steam: number }
+export interface MarketOutlier { game_id: string; kind: Kind; player_id: string; name: string; team: string; pos: string; book: string; line: number;
+  consensus: number; side: "Over" | "Under"; odds: number; fair: number; ev: number; books: number }
+export interface MarketBoard { fetches: number; first_at: string | null; last_at: string | null; movers: number; flat: number; moves: MarketMove[]; outliers: MarketOutlier[] }
 export interface HistoryPoint { at: string; line: number; books: number; p_over: number | null; p_now_line: number | null; best_over: number | null; best_under: number | null }
 /** One team's side of a game: win chance from the team model, the market (no-vig) and the blend, and the best moneyline. */
 export interface MoneylineSide {
@@ -333,6 +340,8 @@ export const api = {
   vsDefense: (id: string, kind: Kind) => get<VsDefense>(`players/${id}/vs-defense`, { kind }),
   /** The league on screen's defenses by how soft they are for each slot and market, softest first. */
   softSpots: () => get<SoftSpot[]>(lg("soft-spots")),
+  /** The league on screen's market: moves since the first fetch, steam, and quotes far from the consensus. */
+  market: () => get<MarketBoard>(lg("market")),
   history: (id: string, kind: Kind) => get<HistoryPoint[]>(`${NBA_KIND_SET.has(kind) ? "nba/" : ""}players/${id}/history`, { kind }),
   injuries: () => get<InjuryReport>(lg("injuries")),
   grades: () => get<GradeReport>("grades"),

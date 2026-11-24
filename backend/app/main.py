@@ -35,7 +35,7 @@ from .engine.picks import best_picks, build_picks
 from .engine.search import rank_hits
 from .nba import lead
 from .nba import routes as nba_routes
-from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
+from .schemas import (AdminState, Correlations, EndzoneBoard, GradeReport, AltFetchResult, AutoSync, CreditStatus, KeyBalance, SlotOut, SyncRunDetail, SyncRunOut, SyncPlan, GameLogEntry, SoftSpot, MarketBoard, VsDefenseOut, VsDefenseRow, HistoryPoint, HotTeamOut, InjuryReport, LadderOut, ByeTeam, Game, JobStatus, Kind, Meta, MoneylineGame, OddsInfo, HotOut, PickOut, PlayerDetail, PlayerHit, ProjectionOut,
                       RefreshRequest, RunInfo, SiteSettings, Slate)
 
 @asynccontextmanager
@@ -699,6 +699,15 @@ def build_soft_spots(db: Session, run: Run) -> list[dict]:
             allowed, league = {}, {}
         _spots_cache[run.id] = dvpm.soft_spots(proj_frame(db, run.id), allowed, league)
     return _spots_cache[run.id]
+@app.get("/api/market", response_model=MarketBoard)
+def market_board(db: Session = Depends(get_db)):
+    """The week's market from stored odds history (no Odds API credits): biggest moves since the first fetch, steam,
+    movers vs flat lines, and the latest quotes far from the consensus."""
+    run = latest_run(db)
+    if not run:
+        return MarketBoard(moves=[], outliers=[])
+    ids = list(db.scalars(select(Projection.game_id).where(Projection.run_id == run.id).distinct()))
+    return market_fit.cached_board(db, run.id, proj_frame(db, run.id), _dists(run), "nfl", ids)
 
 
 @app.get("/api/players/{player_id}/history", response_model=list[HistoryPoint])
