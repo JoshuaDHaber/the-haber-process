@@ -611,3 +611,16 @@ def test_market_board_answers_from_stored_history_only(client, monkeypatch):
     for path in ("/api/market", "/api/nba/market"):
         r = client.get(path)
         assert r.status_code == 200 and set(r.json()) >= {"moves", "outliers", "fetches"}
+
+
+def test_game_context_for_a_game_on_the_slate(client, monkeypatch):
+    st = pd.DataFrame([dict(player_id="p0", player_display_name="Alpha Back", season=2026, week=w, season_type="REG", position="RB",
+                            team="AAA", opponent_team="CCC", targets=2, carries=15) for w in (1, 2, 3)])
+    monkeypatch.setattr(main, "_stats", lambda season: st)
+    monkeypatch.setattr(main.data, "cached_schedule", lambda: None)
+    monkeypatch.setattr(main, "_redzone", lambda season, hour: pd.DataFrame(columns=["player_id", "season", "week", "team", "kind"]))
+    main._ctx_cache.clear()
+    d = client.get("/api/games/2026_04_BBB_AAA/context").json()
+    aaa = next(t for t in d["teams"] if t["team"] == "AAA")
+    assert aaa["implied"] is None and aaa["players"][0]["name"] == "Alpha Back" and aaa["players"][0]["car_l5"] == 1.0
+    assert client.get("/api/games/2026_04_XXX_YYY/context").status_code == 404

@@ -1211,3 +1211,16 @@ button.primary:focus-visible, a.primary:focus-visible { outline: 2px solid var(-
 .mkt-card table { font-size: 13px; } .mkt-card th, .mkt-card td { padding: 7px 10px; position: static; } .mkt-card td:first-child { white-space: normal; } .mkt-card td:first-child .link { text-align: left; }
 .mkt-meta, .mkt-steam { display: block; font-size: 11px; font-weight: 400; }
 .mkt-more { margin: 10px 0 0; text-align: center; }
+
+/* Game page: game script and roles (GameContext.tsx) */
+.ctx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; align-items: start; }
+.ctx-team { padding: 12px 14px; border-radius: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ctx-h { display: flex; align-items: center; gap: 8px; } .ctx-pts { margin-left: auto; font-size: 13px; } .ctx-pts b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.ctx-script { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }
+.ctx-table { overflow-x: auto; margin: 0 -14px -12px; border-top: 1px solid var(--line); }
+.ctx-table table { font-size: 13px; } .ctx-table th, .ctx-table td { padding: 6px 6px; position: static; }
+@media (max-width: 480px) { .ctx-table table { font-size: 12px; } .ctx-table th { letter-spacing: 0; } }
+.ctx-table th:first-child, .ctx-table td:first-child { padding-left: 14px; white-space: normal; } .ctx-table td:first-child .link { text-align: left; }
+.ctx-meta { display: block; font-size: 11px; font-weight: 400; }
+.ctx-trend { font-size: 10px; margin-left: 3px; } .ctx-trend.up { color: var(--good); } .ctx-trend.down { color: var(--bad); }
+.ctx-both { flex-wrap: wrap; gap: 8px 18px; } .ctx-side { display: inline-flex; align-items: center; gap: 8px; } .ctx-side .ctx-pts { margin-left: 4px; }

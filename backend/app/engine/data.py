@@ -49,7 +49,8 @@ PIPELINE_COLUMNS = ["player_id", "player_display_name", "position", "season", "w
                     "attempts", "passing_yards", "passing_tds"]
 PBP_COLUMNS = ["game_id", "play_id", "season", "week", "season_type", "receiver_player_id", "complete_pass", "receiving_yards",
                "rusher_player_id", "rush_attempt", "rushing_yards", "two_point_attempt", "touchdown", "td_player_id",
-               "td_team", "rush_touchdown", "pass_touchdown", "yards_gained", "return_yards", "total_home_score", "total_away_score"]
+               "td_team", "rush_touchdown", "pass_touchdown", "yards_gained", "return_yards", "total_home_score", "total_away_score",
+               "yardline_100", "posteam", "pass_attempt"]
 
 
 def load_stats(seasons, usecols=None, positions=None):
@@ -114,11 +115,23 @@ def _leads(p):
     return g.dropna().reset_index()
 
 
-PBP_CUTS = {"catches": _catches, "rushes": _rushes, "first_tds": _first_tds, "tds": _tds, "leads": _leads}
+def _redzone(p):
+    """Every target and carry inside the opponent's 20 (yardline_100 <= 20), two-point tries left out: who got the
+    ball where touchdowns are scored."""
+    rz = p[(p.yardline_100 <= 20) & (p.two_point_attempt.fillna(0) != 1)]
+    tg = rz[(rz.pass_attempt == 1) & rz.receiver_player_id.notna()]
+    ca = rz[(rz.rush_attempt == 1) & rz.rusher_player_id.notna()]
+    return pd.concat([pd.DataFrame({"player_id": tg.receiver_player_id, "season": tg.season, "week": tg.week, "team": tg.posteam, "kind": "tgt"}),
+                      pd.DataFrame({"player_id": ca.rusher_player_id, "season": ca.season, "week": ca.week, "team": ca.posteam, "kind": "car"})],
+                     ignore_index=True)
+
+
+PBP_CUTS = {"catches": _catches, "rushes": _rushes, "first_tds": _first_tds, "tds": _tds, "leads": _leads, "redzone": _redzone}
 CUT_COLUMNS = {"catches": ["player_id", "season", "week", "yards"], "rushes": ["player_id", "season", "week", "yards"],
                "first_tds": ["player_id", "season", "week", "game_id"],
                "tds": ["player_id", "season", "week", "game_id", "team", "kind", "yards"],
-               "leads": ["game_id", "home_lead", "away_lead", "season"]}
+               "leads": ["game_id", "home_lead", "away_lead", "season"],
+               "redzone": ["player_id", "season", "week", "team", "kind"]}
 
 
 def _load_pbp(seasons, cut, keep_raw=None):
@@ -175,6 +188,11 @@ def load_first_tds(seasons):
 def load_tds(seasons):
     """Every regular-season touchdown (player_id, season, week, game_id, team, kind rush/rec/ret, yards)."""
     return _load_pbp(seasons, "tds")
+
+
+def load_redzone(seasons):
+    """Every regular-season target and carry inside the 20 (player_id, season, week, team, kind tgt/car)."""
+    return _load_pbp(seasons, "redzone")
 
 
 def load_leads(seasons, keep_raw=None):

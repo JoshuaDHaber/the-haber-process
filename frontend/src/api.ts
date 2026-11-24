@@ -171,6 +171,12 @@ export interface MarketMove { game_id: string; kind: Kind; player_id: string; na
 export interface MarketOutlier { game_id: string; kind: Kind; player_id: string; name: string; team: string; pos: string; book: string; line: number;
   consensus: number; side: "Over" | "Under"; odds: number; fair: number; ev: number; books: number }
 export interface MarketBoard { fetches: number; first_at: string | null; last_at: string | null; movers: number; flat: number; moves: MarketMove[]; outliers: MarketOutlier[] }
+/** The game page's context (backend engine/gamectx.py): implied points, a script read, and (NFL) each team's shares. */
+export interface ShareRow { player_id: string; name: string; pos: string; team: string; games: number; played: number;
+  tgt_l5: number; tgt_prior: number | null; tgt_trend: number; car_l5: number; car_prior: number | null; car_trend: number;
+  rz_share: number | null; rz: number; rz_team: number; p_td: number | null; exp_td: number | null; p_td2: number | null }
+export interface TeamContext { team: string; implied: number | null; opp_implied: number | null; spread: number | null; total: number | null; script: string[]; players: ShareRow[] }
+export interface GameContext { game_id: string; teams: TeamContext[] }
 export interface HistoryPoint { at: string; line: number; books: number; p_over: number | null; p_now_line: number | null; best_over: number | null; best_under: number | null }
 /** One team's side of a game: win chance from the team model, the market (no-vig) and the blend, and the best moneyline. */
 export interface MoneylineSide {
@@ -342,6 +348,7 @@ export const api = {
   softSpots: () => get<SoftSpot[]>(lg("soft-spots")),
   /** The league on screen's market: moves since the first fetch, steam, and quotes far from the consensus. */
   market: () => get<MarketBoard>(lg("market")),
+  gameContext: (gameId: string) => get<GameContext>(lg(`games/${gameId}/context`)),
   history: (id: string, kind: Kind) => get<HistoryPoint[]>(`${NBA_KIND_SET.has(kind) ? "nba/" : ""}players/${id}/history`, { kind }),
   injuries: () => get<InjuryReport>(lg("injuries")),
   grades: () => get<GradeReport>("grades"),

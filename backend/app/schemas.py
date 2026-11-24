@@ -363,6 +363,41 @@ class MarketBoard(BaseModel):
     flat: int = 0         # same line, under 1.5 points of movement, over 3+ fetches
     moves: list[MarketMove]
     outliers: list[MarketOutlier]
+class ShareRow(BaseModel):
+    player_id: str
+    name: str
+    pos: str
+    team: str
+    games: int                          # team games in the "last N"
+    played: int = 0                     # ... of which he played (his shares count only those)
+    tgt_l5: float                       # share of the team's targets in its last N games
+    tgt_prior: Optional[float] = None   # ... in its games before those this season (None with fewer than 2)
+    tgt_trend: int = 0                  # +1 up 3+ points on the rest of the season, -1 down
+    car_l5: float
+    car_prior: Optional[float] = None
+    car_trend: int = 0
+    rz_share: Optional[float] = None    # share of the team's targets + carries inside the 20 this season
+    rz: int = 0
+    rz_team: int = 0
+    p_td: Optional[float] = None        # anytime TD chance (the projection)
+    exp_td: Optional[float] = None      # expected TDs, as a Poisson count with that chance of 1+
+    p_td2: Optional[float] = None       # chance of 2+ TDs
+
+
+class TeamContext(BaseModel):
+    team: str
+    implied: Optional[float] = None     # points the spread and total expect it to score
+    opp_implied: Optional[float] = None
+    spread: Optional[float] = None      # this team's, positive = favored
+    total: Optional[float] = None
+    script: list[str]
+    players: list[ShareRow]
+
+
+class GameContext(BaseModel):
+    """The game page's context (engine/gamectx.py): implied totals, the script read, and each team's shares."""
+    game_id: str
+    teams: list[TeamContext]
 
 
 class GameLogEntry(BaseModel):

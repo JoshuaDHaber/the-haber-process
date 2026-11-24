@@ -83,3 +83,16 @@ def test_a_two_way_player_filed_under_defense_takes_his_roster_position(cache, m
     assert list(data.load_stats([2026]).player_id) == ["rb"]
     df = data.load_stats([2026], positions={"hunter": "WR", "rb": "FB"})
     assert dict(zip(df.player_id, df.position)) == {"hunter": "WR", "rb": "RB"}   # an offensive label from the stats file stays
+
+
+def test_redzone_cut_keeps_targets_and_carries_inside_the_20():
+    import pandas as pd
+    from app.engine import data
+    p = pd.DataFrame([
+        dict(yardline_100=15, two_point_attempt=0, pass_attempt=1, receiver_player_id="w", rush_attempt=0, rusher_player_id=None, season=2026, week=3, posteam="KC"),
+        dict(yardline_100=5, two_point_attempt=0, pass_attempt=0, receiver_player_id=None, rush_attempt=1, rusher_player_id="r", season=2026, week=3, posteam="KC"),
+        dict(yardline_100=40, two_point_attempt=0, pass_attempt=1, receiver_player_id="w", rush_attempt=0, rusher_player_id=None, season=2026, week=3, posteam="KC"),
+        dict(yardline_100=2, two_point_attempt=1, pass_attempt=1, receiver_player_id="w", rush_attempt=0, rusher_player_id=None, season=2026, week=3, posteam="KC"),
+    ])
+    out = data._redzone(p)
+    assert sorted(zip(out.player_id, out.kind)) == [("r", "car"), ("w", "tgt")]

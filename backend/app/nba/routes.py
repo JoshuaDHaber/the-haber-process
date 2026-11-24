@@ -16,12 +16,12 @@ from ..db import NbaAltLine, NbaOddsLine, NbaProjection, NbaRun, SessionLocal, c
 from ..engine import hot as hotm
 from ..engine import moneyline as mlm
 from ..engine import dvp as dvp_mod
-from ..engine import odds
+from ..engine import gamectx, odds
 from ..engine.ladder import ALT_OVER_LONG_SHOT, build_ladder, calibrated_mu, ladder_curve
 from ..engine.market import curve_for, main_quotes, weight_for
 from ..engine.picks import MAX_EV, best_picks, build_picks
 from ..engine.search import rank_hits
-from ..schemas import (SoftSpot, MarketBoard, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
+from ..schemas import (GameContext, SoftSpot, MarketBoard, AutoSync, BacktestStat, Correlations, Game, GameLogEntry, GradeReport, HistoryPoint, HotOut, HotTeamOut, InjuredPlayer, InjuryReport, KingBoard,
                        LadderOut, MoneylineGame, NbaMeta, NbaRunInfo, NbaSlate, OddsInfo, PickOut, PlayerDetail, PlayerHit, ProjectionOut)
 from . import espn, grading, king, lead, model
 from . import odds as nba_odds
@@ -154,6 +154,16 @@ def market_board(db: Session = Depends(get_db)):
     if not live:
         return MarketBoard(moves=[], outliers=[])
     return market_fit.cached_board(db, run.id, _proj_frame(db, run.id), _dists(run), "nba", live)
+
+
+@router.get("/games/{game_id}/context", response_model=GameContext)
+def game_context(game_id: str, db: Session = Depends(get_db)):
+    """One game's context for its page: implied points and a game-script read (engine/gamectx.nba_context)."""
+    run = latest_run(db)
+    g = next((g for g in (run.games or []) if g["game_id"] == game_id), None) if run else None
+    if g is None:
+        raise HTTPException(404, "That game isn't on the slate")
+    return gamectx.nba_context(dict(game_id=game_id, home=g["home"], away=g["away"], total=g.get("total"), spread=g.get("spread_line")))
 
 
 @router.get("/projections", response_model=list[ProjectionOut])
